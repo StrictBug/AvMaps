@@ -427,7 +427,8 @@ def plot_map(data, init_time, forecast_hour):
     
     # Plot TAF locations with filtering based on text bounding boxes
     if taf_lons:  # Only plot if TAF data was loaded successfully
-        # Don't plot markers - just use labels to mark TAF locations (labels are more readable)
+        # Plot small dots to mark TAF locations
+        ax.scatter(taf_lons, taf_lats, s=10, c='black', marker='o', zorder=100, transform=ccrs.PlateCarree())
         
         # Track which points to keep
         points_to_keep = []
