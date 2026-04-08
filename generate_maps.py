@@ -411,12 +411,50 @@ def plot_map(data, init_time, forecast_hour):
     ax.barbs(data.longitude[::10], data.latitude[::10], u_wind.values[::10, ::10], v_wind.values[::10, ::10], 
              length=5, linewidth=0.5, color='green')
     
-    # Plot TAF locations
+    # Plot TAF locations with filtering based on text bounding boxes
     if taf_lons:  # Only plot if TAF data was loaded successfully
-        ax.scatter(taf_lons, taf_lats, s=20, c='black', marker='o', zorder=100, transform=ccrs.PlateCarree())
+        # Create scatter plot with all TAF points (we'll filter later)
+        scatter = ax.scatter(taf_lons, taf_lats, s=20, c='black', marker='o', zorder=100, transform=ccrs.PlateCarree())
+        
+        # Create text objects for all TAF names
+        text_objects = []
         for lon, lat, name in zip(taf_lons, taf_lats, taf_names):
-            ax.text(lon - 0.25, lat + 0.25, name, fontsize=6, ha='right', va='bottom', 
-                   family='Tahoma', zorder=101, transform=ccrs.PlateCarree())
+            text_obj = ax.text(lon - 0.25, lat + 0.25, name, fontsize=6, ha='right', va='bottom', 
+                              family='Tahoma', zorder=101, transform=ccrs.PlateCarree())
+            text_objects.append((text_obj, lon, lat, name))
+        
+        # Draw canvas to compute text extents
+        fig.canvas.draw()
+        
+        # Check which text objects have bounding boxes completely within domain
+        texts_to_remove = []
+        for idx, (text_obj, lon, lat, name) in enumerate(text_objects):
+            # Get text bounding box in display coordinates
+            bbox_display = text_obj.get_window_extent(renderer=fig.canvas.get_renderer())
+            
+            # Transform bounding box corners to data coordinates
+            # Get the transform from display to data coordinates
+            trans_display_to_data = ax.transData.inverted()
+            bbox_data = bbox_display.transformed(trans_display_to_data)
+            
+            # Check if all corners of bounding box are within domain bounds
+            x_min, y_min = bbox_data.xmin, bbox_data.ymin
+            x_max, y_max = bbox_data.xmax, bbox_data.ymax
+            
+            # If any corner is outside domain, mark for removal
+            if not (lon_min <= x_min and x_max <= lon_max and 
+                    lat_min <= y_min and y_max <= lat_max):
+                texts_to_remove.append(idx)
+                print(f"Removing {name}: bbox outside domain (lon: {x_min:.2f}-{x_max:.2f}, lat: {y_min:.2f}-{y_max:.2f})")
+        
+        # Remove text objects that extend outside domain (in reverse order to maintain indices)
+        for idx in sorted(texts_to_remove, reverse=True):
+            text_objects[idx][0].remove()
+            # Also remove corresponding scatter point
+            offsets = scatter.get_offsets()
+            scatter.set_offsets(np.delete(offsets, idx, axis=0))
+        
+        print(f"Removed {len(texts_to_remove)} TAF points with labels outside domain")
     
     # Add title
     title = f'GFS Forecast +{forecast_hour}hrs\nInit: {init_time.strftime("%Y-%m-%d %HZ")}\nValid: {(init_time + timedelta(hours=forecast_hour)).strftime("%Y-%m-%d %HZ")}'
