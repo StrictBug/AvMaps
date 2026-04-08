@@ -2,6 +2,11 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import BoundaryNorm, ListedColormap
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
+from cartopy.io.shapereader import Reader, natural_earth
+from cartopy.feature import ShapelyFeature
+from shapely.geometry import Point
+from shapely.prepared import prep
+from shapely.ops import unary_union
 from siphon.catalog import TDSCatalog
 from siphon.ncss import NCSS
 import xarray as xr
@@ -158,7 +163,19 @@ def plot_map(data, init_time, forecast_hour):
     # Add features
     ax.add_feature(cfeature.COASTLINE)
     ax.add_feature(cfeature.BORDERS)
-    ax.add_feature(cfeature.STATES, linewidth=0.5)
+    
+    # Add GAF boundaries from shapefile instead of state boundaries
+    try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        gaf_shp = os.path.join(script_dir, 'geo files', 'GAF_Boundaries.shp')
+        reader = Reader(gaf_shp)
+        gaf_feature = ShapelyFeature(reader.geometries(), ccrs.PlateCarree(), 
+                                     facecolor='none', edgecolor='black', linewidth=0.5)
+        ax.add_feature(gaf_feature)
+    except Exception as e:
+        print(f"Warning: Could not load GAF boundaries: {e}")
+        # Fallback to state boundaries if shapefile loading fails
+        ax.add_feature(cfeature.STATES, linewidth=0.5)
     
     # Set extent
     ax.set_extent([lon_min, lon_max, lat_min, lat_max], crs=ccrs.PlateCarree())
@@ -213,11 +230,6 @@ def plot_map(data, init_time, forecast_hour):
     
     if elev is not None and lon_grid is not None and lat_grid is not None:
         # Create mask for ocean areas using Natural Earth land feature
-        from cartopy.io.shapereader import natural_earth, Reader
-        from shapely.geometry import Point
-        from shapely.prepared import prep
-        from shapely.ops import unary_union
-        
         print("Creating ocean mask from Natural Earth land data...")
         
         # Load Natural Earth 10m land shapefile to identify land areas  
