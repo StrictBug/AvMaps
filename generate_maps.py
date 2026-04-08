@@ -171,10 +171,14 @@ def plot_map(data, init_time, forecast_hour):
         taf_file = os.path.join(script_dir, 'geo files', 'TAF lat long.csv')
         taf_data = pd.read_csv(taf_file, delimiter='\t')
         for idx, row in taf_data.iterrows():
-            taf_names.append(row['TAF'])
-            taf_lats.append(row['Latitude'])
-            taf_lons.append(row['Longitude'])
-        print(f"Loaded {len(taf_names)} TAF locations")
+            lat = row['Latitude']
+            lon = row['Longitude']
+            # Only include TAF points within the domain bounds
+            if lat_min <= lat <= lat_max and lon_min <= lon <= lon_max:
+                taf_names.append(row['TAF'])
+                taf_lats.append(lat)
+                taf_lons.append(lon)
+        print(f"Loaded {len(taf_names)} TAF locations within domain")
     except Exception as e:
         print(f"Warning: Could not load TAF locations: {e}")
     
