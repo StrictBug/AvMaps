@@ -15,6 +15,8 @@ from metpy.units import units
 import numpy as np
 from datetime import datetime, timedelta, timezone
 import os
+import pandas as pd
+import pandas as pd
 
 # Define the Australia domain
 # SW corner: 47°57'S, 103°34'E
@@ -159,6 +161,22 @@ def get_gfs_data():
 def plot_map(data, init_time, forecast_hour):
     fig = plt.figure(figsize=(12, 8))
     ax = fig.add_subplot(1, 1, 1, projection=ccrs.PlateCarree())
+    
+    # Load TAF data early for plotting later
+    taf_lons = []
+    taf_lats = []
+    taf_names = []
+    try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        taf_file = os.path.join(script_dir, 'geo files', 'TAF lat long.csv')
+        taf_data = pd.read_csv(taf_file, delimiter='\t')
+        for idx, row in taf_data.iterrows():
+            taf_names.append(row['TAF'])
+            taf_lats.append(row['Latitude'])
+            taf_lons.append(row['Longitude'])
+        print(f"Loaded {len(taf_names)} TAF locations")
+    except Exception as e:
+        print(f"Warning: Could not load TAF locations: {e}")
     
     # Add features
     ax.add_feature(cfeature.COASTLINE)
@@ -386,6 +404,13 @@ def plot_map(data, init_time, forecast_hour):
     v_wind = data['v-component_of_wind_height_above_ground'].sel(height_above_ground2=10).isel(time2=0)
     ax.barbs(data.longitude[::10], data.latitude[::10], u_wind.values[::10, ::10], v_wind.values[::10, ::10], 
              length=5, linewidth=0.5, color='green')
+    
+    # Plot TAF locations
+    if taf_lons:  # Only plot if TAF data was loaded successfully
+        ax.scatter(taf_lons, taf_lats, s=20, c='black', marker='o', zorder=100, transform=ccrs.PlateCarree())
+        for lon, lat, name in zip(taf_lons, taf_lats, taf_names):
+            ax.text(lon - 0.25, lat + 0.25, name, fontsize=6, ha='right', va='bottom', 
+                   family='Tahoma', zorder=101, transform=ccrs.PlateCarree())
     
     # Add title
     title = f'GFS Forecast +{forecast_hour}hrs\nInit: {init_time.strftime("%Y-%m-%d %HZ")}\nValid: {(init_time + timedelta(hours=forecast_hour)).strftime("%Y-%m-%d %HZ")}'
