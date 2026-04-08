@@ -174,7 +174,9 @@ def plot_map(data, init_time, forecast_hour):
             lat = row['Latitude']
             lon = row['Longitude']
             # Only include TAF points within the domain bounds
-            if lat_min <= lat <= lat_max and lon_min <= lon <= lon_max:
+            # Also account for label offset (-0.25 lon, +0.25 lat) to keep labels inside domain
+            if (lat_min <= lat <= lat_max and lon_min <= lon <= lon_max and
+                lon - 0.25 >= lon_min and lat + 0.25 <= lat_max):
                 taf_names.append(row['TAF'])
                 taf_lats.append(lat)
                 taf_lons.append(lon)
