@@ -26,6 +26,20 @@ lat_max = -22.55  # 22°33'S
 lon_min = 103.5667  # 103°34'E
 lon_max = 172.1167  # 172°7'E
 
+# Helper function to handle different GFS time dimension names
+def get_time_index(data_var):
+    """Get first time index, handling both 'time2' and 'validtime1' dimension names"""
+    if 'time2' in data_var.dims:
+        return data_var.isel(time2=0)
+    elif 'validtime1' in data_var.dims:
+        return data_var.isel(validtime1=0)
+    else:
+        # If neither, try to find the time dimension dynamically
+        time_dims = [d for d in data_var.dims if 'time' in d.lower() or 'valid' in d.lower()]
+        if time_dims:
+            return data_var.isel({time_dims[0]: 0})
+        return data_var  # Return as-is if no time dimension
+
 # Function to get elevation data from GFS surface geopotential
 def get_elevation_data(data=None):
     """Extract elevation from GFS surface geopotential height or use remote sources"""
@@ -35,7 +49,7 @@ def get_elevation_data(data=None):
         try:
             print("Extracting elevation from GFS surface geopotential...")
     # Get surface geopotential height
-            geop_surface = data['Geopotential_height_surface'].isel(time2=0)
+            geop_surface = get_time_index(data['Geopotential_height_surface'])
             
             print(f"Raw geopotential min/max: {geop_surface.values.min():.0f} / {geop_surface.values.max():.0f}")
             print(f"Variable units: {geop_surface.attrs.get('units', 'unknown')}")
@@ -297,21 +311,21 @@ def plot_map(data, init_time, forecast_hour):
             transform=ccrs.PlateCarree())
     
     # Plot MSLP
-    mslp = data['MSLP_Eta_model_reduction_msl'].isel(time2=0) / 100  # Convert to hPa
+    mslp = get_time_index(data['MSLP_Eta_model_reduction_msl']) / 100  # Convert to hPa
     cs_mslp = ax.contour(data.longitude, data.latitude, mslp, levels=np.arange(980, 1040, 4), colors='black', linewidths=1)
     ax.clabel(cs_mslp, inline=True, fontsize=8)
     
     # Plot thickness (1000-500 hPa)
-    hgt_1000 = data['Geopotential_height_isobaric'].sel(isobaric=100000).isel(time2=0) / 10  # Convert to dam
-    hgt_500 = data['Geopotential_height_isobaric'].sel(isobaric=50000).isel(time2=0) / 10
+    hgt_1000 = get_time_index(data['Geopotential_height_isobaric'].sel(isobaric=100000)) / 10  # Convert to dam
+    hgt_500 = get_time_index(data['Geopotential_height_isobaric'].sel(isobaric=50000)) / 10
     thickness = hgt_500 - hgt_1000
     cs_thickness = ax.contour(data.longitude, data.latitude, thickness, levels=np.arange(480, 600, 6), colors='red', linewidths=1)
     ax.clabel(cs_thickness, inline=True, fontsize=8, fmt='%d')
     
     # Plot low cloud layer (maxRH at 1000, 975, 950 hPa)
-    rh_1000 = data['Relative_humidity_isobaric'].sel(isobaric=100000).isel(time2=0)
-    rh_975 = data['Relative_humidity_isobaric'].sel(isobaric=97500).isel(time2=0)
-    rh_950 = data['Relative_humidity_isobaric'].sel(isobaric=95000).isel(time2=0)
+    rh_1000 = get_time_index(data['Relative_humidity_isobaric'].sel(isobaric=100000))
+    rh_975 = get_time_index(data['Relative_humidity_isobaric'].sel(isobaric=97500))
+    rh_950 = get_time_index(data['Relative_humidity_isobaric'].sel(isobaric=95000))
     
     # Calculate maximum RH across the three levels
     max_rh = np.maximum(np.maximum(rh_1000.values, rh_975.values), rh_950.values)
@@ -334,9 +348,9 @@ def plot_map(data, init_time, forecast_hour):
         transform=ccrs.PlateCarree())
     
     # Plot drizzle layer (average RH at 950, 900, 850 hPa)
-    rh_950_drizzle = data['Relative_humidity_isobaric'].sel(isobaric=95000).isel(time2=0)
-    rh_900 = data['Relative_humidity_isobaric'].sel(isobaric=90000).isel(time2=0)
-    rh_850 = data['Relative_humidity_isobaric'].sel(isobaric=85000).isel(time2=0)
+    rh_950_drizzle = get_time_index(data['Relative_humidity_isobaric'].sel(isobaric=95000))
+    rh_900 = get_time_index(data['Relative_humidity_isobaric'].sel(isobaric=90000))
+    rh_850 = get_time_index(data['Relative_humidity_isobaric'].sel(isobaric=85000))
     
     # Calculate average RH across the three levels
     avg_rh_drizzle = (rh_950_drizzle.values + rh_900.values + rh_850.values) / 3.0
@@ -362,7 +376,7 @@ def plot_map(data, init_time, forecast_hour):
         transform=ccrs.PlateCarree())
     
     # Plot 1hr precipitation with custom colormap from XML
-    precip = data['Precipitation_rate_surface'].isel(time2=0) * 3600  # Convert to mm/hr
+    precip = get_time_index(data['Precipitation_rate_surface']) * 3600  # Convert to mm/hr
     
     # Mask out precipitation below 0.1 mm/hr to show low clouds underneath
     precip_masked = precip.where(precip >= 0.1, np.nan)
@@ -406,8 +420,8 @@ def plot_map(data, init_time, forecast_hour):
         transform=ccrs.PlateCarree())
     
     # Plot SFC winds
-    u_wind = data['u-component_of_wind_height_above_ground'].sel(height_above_ground2=10).isel(time2=0)
-    v_wind = data['v-component_of_wind_height_above_ground'].sel(height_above_ground2=10).isel(time2=0)
+    u_wind = get_time_index(data['u-component_of_wind_height_above_ground'].sel(height_above_ground2=10))
+    v_wind = get_time_index(data['v-component_of_wind_height_above_ground'].sel(height_above_ground2=10))
     ax.barbs(data.longitude[::10], data.latitude[::10], u_wind.values[::10, ::10], v_wind.values[::10, ::10], 
              length=5, linewidth=0.5, color='green')
     
