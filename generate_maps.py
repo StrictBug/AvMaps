@@ -414,7 +414,7 @@ def plot_map(data, init_time, forecast_hour):
     # Plot TAF locations with filtering based on text bounding boxes
     if taf_lons:  # Only plot if TAF data was loaded successfully
         # Create scatter plot with all TAF points (we'll filter later)
-        scatter = ax.scatter(taf_lons, taf_lats, s=20, c='black', marker='o', zorder=100, transform=ccrs.PlateCarree())
+        scatter = ax.scatter(taf_lons, taf_lats, s=5, c='black', marker='o', zorder=100, transform=ccrs.PlateCarree())
         
         # Create text objects for all TAF names
         text_objects = []
