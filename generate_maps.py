@@ -306,7 +306,7 @@ def plot_map(data, init_time, forecast_hour):
             levels=elev_levels,
             cmap=elev_cmap,
             norm=elev_norm,
-            alpha=0.4,
+            alpha=0.3,
             extend='both',
             transform=ccrs.PlateCarree())
     
