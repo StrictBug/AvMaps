@@ -319,8 +319,17 @@ def plot_map(data, init_time, forecast_hour):
     hgt_1000 = get_time_index(data['Geopotential_height_isobaric'].sel(isobaric=100000)) / 10  # Convert to dam
     hgt_500 = get_time_index(data['Geopotential_height_isobaric'].sel(isobaric=50000)) / 10
     thickness = hgt_500 - hgt_1000
-    cs_thickness = ax.contour(data.longitude, data.latitude, thickness, levels=np.arange(480, 600, 6), colors='red', linewidths=1)
-    ax.clabel(cs_thickness, inline=True, fontsize=8, fmt='%d')
+    
+    # Plot minor interval lines (spacing of 6, red)
+    minor_levels = np.arange(480, 602, 6)
+    cs_thickness_minor = ax.contour(data.longitude, data.latitude, thickness, levels=minor_levels, 
+                                     colors='red', linewidths=1, linestyles='dashed')
+    
+    # Plot major interval lines (spacing of 18, blue)
+    major_levels = np.arange(480, 602, 18)
+    cs_thickness_major = ax.contour(data.longitude, data.latitude, thickness, levels=major_levels, 
+                                     colors='blue', linewidths=1, linestyles='dashed')
+    ax.clabel(cs_thickness_major, inline=True, fontsize=8, fmt='%d')
     
     # Plot low cloud layer (maxRH at 1000, 975, 950 hPa)
     rh_1000 = get_time_index(data['Relative_humidity_isobaric'].sel(isobaric=100000))
@@ -423,12 +432,12 @@ def plot_map(data, init_time, forecast_hour):
     u_wind = get_time_index(data['u-component_of_wind_height_above_ground'].sel(height_above_ground2=10))
     v_wind = get_time_index(data['v-component_of_wind_height_above_ground'].sel(height_above_ground2=10))
     ax.barbs(data.longitude[::10], data.latitude[::10], u_wind.values[::10, ::10], v_wind.values[::10, ::10], 
-             length=5, linewidth=0.5, color='green')
+             length=5, linewidth=0.5, color='#800000')
     
     # Plot TAF locations with filtering based on text bounding boxes
     if taf_lons:  # Only plot if TAF data was loaded successfully
-        # Plot small dots to mark TAF locations
-        ax.scatter(taf_lons, taf_lats, s=10, c='black', marker='o', zorder=100, transform=ccrs.PlateCarree())
+        # Plot tiny dots to mark TAF locations
+        ax.scatter(taf_lons, taf_lats, s=2, c='black', marker='o', zorder=100, transform=ccrs.PlateCarree())
         
         # Track which points to keep
         points_to_keep = []
