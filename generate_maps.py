@@ -306,7 +306,7 @@ def plot_map(data, init_time, forecast_hour):
             levels=elev_levels,
             cmap=elev_cmap,
             norm=elev_norm,
-            alpha=0.6,
+            alpha=0.4,
             extend='both',
             transform=ccrs.PlateCarree())
     
@@ -320,13 +320,18 @@ def plot_map(data, init_time, forecast_hour):
     hgt_500 = get_time_index(data['Geopotential_height_isobaric'].sel(isobaric=50000)) / 10
     thickness = hgt_500 - hgt_1000
     
-    # Plot minor interval lines (spacing of 6, red)
-    minor_levels = np.arange(480, 602, 6)
-    cs_thickness_minor = ax.contour(data.longitude, data.latitude, thickness, levels=minor_levels, 
+    # Define major and minor levels
+    major_levels = np.arange(480, 602, 18)
+    all_minor_levels = np.arange(480, 602, 6)
+    
+    # Plot only minor lines that are NOT major lines
+    major_levels_set = set(major_levels)
+    minor_only_levels = np.array([x for x in all_minor_levels if x not in major_levels_set])
+    
+    cs_thickness_minor = ax.contour(data.longitude, data.latitude, thickness, levels=minor_only_levels, 
                                      colors='red', linewidths=1, linestyles='dashed')
     
     # Plot major interval lines (spacing of 18, blue)
-    major_levels = np.arange(480, 602, 18)
     cs_thickness_major = ax.contour(data.longitude, data.latitude, thickness, levels=major_levels, 
                                      colors='blue', linewidths=1, linestyles='dashed')
     ax.clabel(cs_thickness_major, inline=True, fontsize=8, fmt='%d')
