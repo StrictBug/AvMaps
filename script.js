@@ -5,8 +5,8 @@ const imageConfig = {
         right: { folder: 'Snow level', title: 'Snow Level', prefix: 'AIRMASSSL' }
     },
     'BG': {
-        left: { folder: 'AG', title: 'AG', prefix: 'BGAG' },
-        right: { folder: 'AC', title: 'AC', prefix: 'BGAC' }
+        left: { folder: 'US', title: 'US', prefix: '' },
+        right: { folder: 'ICON', title: 'ICON', prefix: '' }
     },
     'TS': {
         left: { folder: 'AG', title: 'AG', prefix: 'TSAG' },
@@ -21,10 +21,12 @@ const imageConfig = {
 // Global variables
 let currentCategory = 'BG';
 let currentFrame = 1;
-let maxFrames = 27;
+const DEFAULT_MAX_FRAMES = 27;
+let maxFrames = DEFAULT_MAX_FRAMES;
 let isPlaying = false;
 let animationInterval = null;
 let animationSpeed = 500; // milliseconds
+let bgFramePairs = [];
 
 // DOM elements
 let frameSlider, leftImage, rightImage;
@@ -35,9 +37,96 @@ let categoryButtons;
 document.addEventListener('DOMContentLoaded', function() {
     initializeElements();
     setupEventListeners();
-    loadCategory(currentCategory);
-    updateImages();
+    loadCategory(currentCategory)
+        .then(() => {
+            updateImages();
+        })
+        .catch(error => {
+            console.warn('Failed to initialize category data:', error);
+            updateImages();
+        });
 });
+
+function extractBgHourFromFilename(filename) {
+    const hourMatch = filename.match(/_(\d{2,3})\.[^.]+$/i);
+    if (!hourMatch) return null;
+    return parseInt(hourMatch[1], 10);
+}
+
+async function discoverBgFramesForDirectory(directoryPath) {
+    const response = await fetch(`${directoryPath}/`);
+    if (!response.ok) {
+        throw new Error(`Unable to read ${directoryPath} directory: ${response.status}`);
+    }
+
+    const html = await response.text();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    const links = Array.from(doc.querySelectorAll('a'));
+
+    const frameInfo = links
+        .map(link => {
+            const href = link.getAttribute('href') || '';
+            const filename = decodeURIComponent(href.split('/').pop().split('?')[0]);
+            const hour = extractBgHourFromFilename(filename);
+            return { filename, hour };
+        })
+        .filter(entry => /\.(png|jpg|jpeg|webp)$/i.test(entry.filename) && entry.hour !== null)
+        .sort((a, b) => a.hour - b.hour)
+        .map(entry => ({
+            hour: entry.hour,
+            path: `${directoryPath}/${entry.filename}`
+        }));
+
+    if (frameInfo.length === 0) {
+        throw new Error(`No BG images found in ${directoryPath} directory`);
+    }
+
+    return frameInfo;
+}
+
+async function discoverBgFrames() {
+    const usFrames = await discoverBgFramesForDirectory('images/BG/US');
+    const iconFrames = await discoverBgFramesForDirectory('images/BG/ICON');
+
+    const usByHour = new Map(usFrames.map(frame => [frame.hour, frame.path]));
+    const iconByHour = new Map(iconFrames.map(frame => [frame.hour, frame.path]));
+
+    const commonHours = Array.from(usByHour.keys())
+        .filter(hour => iconByHour.has(hour))
+        .sort((a, b) => a - b);
+
+    const framePairs = commonHours.map(hour => ({
+        hour,
+        leftPath: usByHour.get(hour),
+        rightPath: iconByHour.get(hour)
+    }));
+
+    if (framePairs.length === 0) {
+        throw new Error('No overlapping BG US/ICON frame hours found');
+    }
+
+    return framePairs;
+}
+
+async function ensureBgFramesLoaded(forceRefresh = false) {
+    if (forceRefresh || bgFramePairs.length === 0) {
+        bgFramePairs = await discoverBgFrames();
+    }
+    return bgFramePairs;
+}
+
+function setMaxFramesForCategory(category) {
+    if (category === 'BG' && bgFramePairs.length > 0) {
+        maxFrames = bgFramePairs.length;
+    } else {
+        maxFrames = DEFAULT_MAX_FRAMES;
+    }
+
+    frameSlider.max = maxFrames;
+    currentFrame = Math.min(currentFrame, maxFrames);
+    frameSlider.value = currentFrame;
+}
 
 function initializeElements() {
     // Get references to DOM elements
@@ -137,7 +226,7 @@ function setupEventListeners() {
     });
 }
 
-function switchCategory(category) {
+async function switchCategory(category) {
     if (category === currentCategory) return;
     
     // Remember if animation was playing
@@ -160,7 +249,7 @@ function switchCategory(category) {
     });
     
     currentCategory = category;
-    loadCategory(category);
+    await loadCategory(category);
     updateImages();
     
     // Resume animation if it was playing before
@@ -177,12 +266,23 @@ function switchCategory(category) {
     }
 }
 
-function loadCategory(category) {
+async function loadCategory(category) {
     const config = imageConfig[category];
     if (!config) {
         console.error(`Category ${category} not found in configuration`);
         return;
     }
+
+    if (category === 'BG') {
+        try {
+            await ensureBgFramesLoaded(true);
+        } catch (error) {
+            console.warn('Could not dynamically discover BG files, using existing frame count.', error);
+            bgFramePairs = [];
+        }
+    }
+    
+    setMaxFramesForCategory(category);
     
     // Keep current frame position - don't reset to frame 1
     // Just ensure the slider reflects the current frame
@@ -192,6 +292,26 @@ function loadCategory(category) {
 function updateImages() {
     const config = imageConfig[currentCategory];
     if (!config) return;
+
+    if (currentCategory === 'BG') {
+        if (bgFramePairs.length === 0) {
+            console.warn('No BG frames available to display.');
+            return;
+        }
+
+        const framePair = bgFramePairs[currentFrame - 1];
+        const frameHour = framePair.hour;
+
+        leftImage.classList.remove('error');
+        rightImage.classList.remove('error');
+
+        leftImage.src = framePair.leftPath;
+        rightImage.src = framePair.rightPath;
+
+        leftImage.alt = `US - Hour ${frameHour}`;
+        rightImage.alt = `ICON - Hour ${frameHour}`;
+        return;
+    }
     
     const frameNumber = currentFrame.toString().padStart(3, '0');
     
@@ -242,8 +362,19 @@ function stopAnimation() {
 function preloadImages(category) {
     const config = imageConfig[category];
     if (!config) return;
+
+    if (category === 'BG') {
+        bgFramePairs.forEach(framePair => {
+            const leftImg = new Image();
+            leftImg.src = framePair.leftPath;
+
+            const rightImg = new Image();
+            rightImg.src = framePair.rightPath;
+        });
+        return;
+    }
     
-    for (let i = 1; i <= maxFrames; i++) {
+    for (let i = 1; i <= DEFAULT_MAX_FRAMES; i++) {
         const frameNumber = i.toString().padStart(3, '0');
         
         // Preload left images
@@ -257,7 +388,16 @@ function preloadImages(category) {
 }
 
 // Preload images for better performance
-window.addEventListener('load', function() {
+window.addEventListener('load', async function() {
+    if (currentCategory === 'BG') {
+        try {
+            await ensureBgFramesLoaded();
+            setMaxFramesForCategory('BG');
+        } catch (error) {
+            console.warn('Could not preload BG frames dynamically:', error);
+        }
+    }
+
     // Preload images for all categories
     Object.keys(imageConfig).forEach(category => {
         preloadImages(category);

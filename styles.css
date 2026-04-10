@@ -311,10 +311,6 @@ h1 {
 
 /* Responsive Design */
 @media (max-width: 768px) {
-    .container {
-        padding: 15px;
-    }
-    
     h1 {
         font-size: 2em;
     }
