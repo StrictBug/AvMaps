@@ -9,8 +9,8 @@ const imageConfig = {
         right: { folder: 'ICON', title: 'ICON', prefix: '' }
     },
     'TS': {
-        left: { folder: 'AG', title: 'AG', prefix: 'TSAG' },
-        right: { folder: 'EC', title: 'EC', prefix: 'TSEC' }
+        left: { folder: 'Flash density', title: 'Flash Density', prefix: '' },
+        right: { folder: 'Severe storm potential', title: 'Severe Storm Potential', prefix: '' }
     },
     'Turb': {
         left: { folder: 'MTW', title: 'MTW', prefix: 'TURBMTW' },
@@ -27,6 +27,7 @@ let isPlaying = false;
 let animationInterval = null;
 let animationSpeed = 500; // milliseconds
 let bgFramePairs = [];
+let tsFramePairs = [];
 
 // DOM elements
 let frameSlider, leftImage, rightImage;
@@ -109,6 +110,30 @@ async function discoverBgFrames() {
     return framePairs;
 }
 
+async function discoverTsFrames() {
+    const flashFrames = await discoverBgFramesForDirectory('images/TS/Flash density');
+    const severeFrames = await discoverBgFramesForDirectory('images/TS/Severe storm potential');
+
+    const flashByHour = new Map(flashFrames.map(frame => [frame.hour, frame.path]));
+    const severeByHour = new Map(severeFrames.map(frame => [frame.hour, frame.path]));
+
+    const commonHours = Array.from(flashByHour.keys())
+        .filter(hour => severeByHour.has(hour))
+        .sort((a, b) => a - b);
+
+    const framePairs = commonHours.map(hour => ({
+        hour,
+        leftPath: flashByHour.get(hour),
+        rightPath: severeByHour.get(hour)
+    }));
+
+    if (framePairs.length === 0) {
+        throw new Error('No overlapping TS flash/severe frame hours found');
+    }
+
+    return framePairs;
+}
+
 async function ensureBgFramesLoaded(forceRefresh = false) {
     if (forceRefresh || bgFramePairs.length === 0) {
         bgFramePairs = await discoverBgFrames();
@@ -116,9 +141,18 @@ async function ensureBgFramesLoaded(forceRefresh = false) {
     return bgFramePairs;
 }
 
+async function ensureTsFramesLoaded(forceRefresh = false) {
+    if (forceRefresh || tsFramePairs.length === 0) {
+        tsFramePairs = await discoverTsFrames();
+    }
+    return tsFramePairs;
+}
+
 function setMaxFramesForCategory(category) {
     if (category === 'BG' && bgFramePairs.length > 0) {
         maxFrames = bgFramePairs.length;
+    } else if (category === 'TS' && tsFramePairs.length > 0) {
+        maxFrames = tsFramePairs.length;
     } else {
         maxFrames = DEFAULT_MAX_FRAMES;
     }
@@ -280,6 +314,13 @@ async function loadCategory(category) {
             console.warn('Could not dynamically discover BG files, using existing frame count.', error);
             bgFramePairs = [];
         }
+    } else if (category === 'TS') {
+        try {
+            await ensureTsFramesLoaded(true);
+        } catch (error) {
+            console.warn('Could not dynamically discover TS files, using existing frame count.', error);
+            tsFramePairs = [];
+        }
     }
     
     setMaxFramesForCategory(category);
@@ -310,6 +351,26 @@ function updateImages() {
 
         leftImage.alt = `US - Hour ${frameHour}`;
         rightImage.alt = `ICON - Hour ${frameHour}`;
+        return;
+    }
+
+    if (currentCategory === 'TS') {
+        if (tsFramePairs.length === 0) {
+            console.warn('No TS frames available to display.');
+            return;
+        }
+
+        const framePair = tsFramePairs[currentFrame - 1];
+        const frameHour = framePair.hour;
+
+        leftImage.classList.remove('error');
+        rightImage.classList.remove('error');
+
+        leftImage.src = framePair.leftPath;
+        rightImage.src = framePair.rightPath;
+
+        leftImage.alt = `Flash Density - Hour ${frameHour}`;
+        rightImage.alt = `Severe Storm Potential - Hour ${frameHour}`;
         return;
     }
     
@@ -373,6 +434,17 @@ function preloadImages(category) {
         });
         return;
     }
+
+    if (category === 'TS') {
+        tsFramePairs.forEach(framePair => {
+            const leftImg = new Image();
+            leftImg.src = framePair.leftPath;
+
+            const rightImg = new Image();
+            rightImg.src = framePair.rightPath;
+        });
+        return;
+    }
     
     for (let i = 1; i <= DEFAULT_MAX_FRAMES; i++) {
         const frameNumber = i.toString().padStart(3, '0');
@@ -389,13 +461,17 @@ function preloadImages(category) {
 
 // Preload images for better performance
 window.addEventListener('load', async function() {
-    if (currentCategory === 'BG') {
-        try {
-            await ensureBgFramesLoaded();
-            setMaxFramesForCategory('BG');
-        } catch (error) {
-            console.warn('Could not preload BG frames dynamically:', error);
-        }
+    try {
+        await ensureBgFramesLoaded();
+        setMaxFramesForCategory('BG');
+    } catch (error) {
+        console.warn('Could not preload BG frames dynamically:', error);
+    }
+
+    try {
+        await ensureTsFramesLoaded();
+    } catch (error) {
+        console.warn('Could not preload TS frames dynamically:', error);
     }
 
     // Preload images for all categories

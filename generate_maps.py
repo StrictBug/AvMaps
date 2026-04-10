@@ -91,6 +91,14 @@ def dewpoint_from_temperature_and_rh(temp_k, rh_percent):
     return (b * gamma) / (a - gamma)
 
 
+def mixing_ratio_from_dewpoint_and_pressure(td_c, pressure_hpa):
+    """Return humidity mixing ratio (kg/kg) from dewpoint (C) and pressure (hPa)."""
+    vapor_pressure_hpa = 6.112 * np.exp((17.67 * td_c) / (td_c + 243.5))
+    vapor_pressure_hpa = np.minimum(vapor_pressure_hpa, pressure_hpa - 0.01)
+    epsilon = 0.622
+    return (epsilon * vapor_pressure_hpa) / (pressure_hpa - vapor_pressure_hpa)
+
+
 def calculate_total_totals(data):
     """Return the Total Totals index in degrees Celsius."""
     temp_850 = get_isobaric_field(data['Temperature_isobaric'], 85000)
@@ -151,6 +159,24 @@ def get_gfs_convective_precip_accumulation(forecast_hour, init_time):
         return ds_surface_accum['acpcp'].values
     finally:
         safe_remove_file(temp_grib_path)
+
+
+def derive_incremental_accumulation(current_values, previous_values=None):
+    """Return one-step accumulation, handling source fields that periodically reset."""
+    current_values = np.asarray(current_values)
+    if previous_values is None:
+        return np.maximum(current_values, 0.0)
+
+    previous_values = np.asarray(previous_values)
+    tolerance = 1e-6
+
+    # Some upstream accumulated fields restart from zero at bucket boundaries.
+    # When that happens, the current field already represents the latest bucket,
+    # so subtracting the previous hour would wipe out most of the signal.
+    if np.nanmax(current_values) + tolerance < np.nanmax(previous_values):
+        return np.maximum(current_values, 0.0)
+
+    return np.maximum(current_values - previous_values, 0.0)
 
 
 def get_day_night_grid(valid_time, lons, lats):
@@ -256,6 +282,8 @@ def get_gfs_data(forecast_hour=9, latest_dataset=None, init_time=None, include_t
         'var_RH': 'on',
         'var_TMP': 'on',
         'var_DPT': 'on',
+        'var_CAPE': 'on',
+        'var_PRES': 'on',
         'lev_mean_sea_level': 'on',
         'lev_surface': 'on',
         'lev_1000_mb': 'on',
@@ -364,6 +392,16 @@ def get_gfs_data(forecast_hour=9, latest_dataset=None, init_time=None, include_t
             'Dewpoint_temperature_height_above_ground': d2m,
         }
 
+        if 'cape' in ds_surface.data_vars:
+            dataset_vars['Convective_available_potential_energy_surface'] = ds_surface['cape']
+        if 'pres' in ds_surface.data_vars:
+            dataset_vars['Pressure_surface'] = ds_surface['pres']
+
+        if 'u' in ds_isobaric.data_vars:
+            dataset_vars['u-component_of_wind_isobaric'] = ds_isobaric['u']
+        if 'v' in ds_isobaric.data_vars:
+            dataset_vars['v-component_of_wind_isobaric'] = ds_isobaric['v']
+
         if 'wz' in ds_isobaric.data_vars:
             dataset_vars['Geometric_vertical_velocity_isobaric'] = ds_isobaric['wz']
 
@@ -375,7 +413,7 @@ def get_gfs_data(forecast_hour=9, latest_dataset=None, init_time=None, include_t
                 current_acpcp_values = ds_surface_accum['acpcp'].values
                 if prev_acpcp_values is None:
                     prev_acpcp_values = get_gfs_convective_precip_accumulation(forecast_hour - 1, init_time)
-                acpcp_1h = np.maximum(current_acpcp_values - prev_acpcp_values, 0.0)
+                acpcp_1h = derive_incremental_accumulation(current_acpcp_values, prev_acpcp_values)
 
             dataset_vars['Convective_precipitation_1h_surface'] = (
                 ('latitude', 'longitude'),
@@ -659,6 +697,36 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
     ax = fig.add_subplot(1, 1, 1, projection=ccrs.PlateCarree())
 
     ts_flash_profile = layer_profile == 'ts_flash'
+    ts_severe_profile = layer_profile == 'ts_severe'
+    bg_profile = layer_profile == 'bg'
+
+    # Keep TS profile layering unchanged while restoring the requested BG stack.
+    if bg_profile:
+        z_coast = 9
+        z_borders = 9
+        z_gaf = 9
+        z_mslp = 6
+        z_thickness = 7
+        z_low_cloud = 2
+        z_fog = 3
+        z_drizzle = 4
+        z_bg_precip = 5
+        z_bg_barbs = 8
+        z_taf_points = 10
+        z_taf_text = 11
+    else:
+        z_coast = 220
+        z_borders = 220
+        z_gaf = 221
+        z_mslp = 5
+        z_thickness = 6
+        z_low_cloud = 2
+        z_fog = 3
+        z_drizzle = 4
+        z_bg_precip = 7
+        z_bg_barbs = 6
+        z_taf_points = 100
+        z_taf_text = 101
     
     # Load TAF data early for plotting later
     taf_lons = []
@@ -683,8 +751,8 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         print(f"Warning: Could not load TAF locations: {e}")
     
     # Add land/border boundaries on top of all weather layers.
-    ax.add_feature(cfeature.COASTLINE, linewidth=0.8, zorder=220)
-    ax.add_feature(cfeature.BORDERS, linewidth=0.7, zorder=220)
+    ax.add_feature(cfeature.COASTLINE, linewidth=0.8, zorder=z_coast)
+    ax.add_feature(cfeature.BORDERS, linewidth=0.7, zorder=z_borders)
     
     # Add GAF boundaries from shapefile
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -692,7 +760,7 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
     reader = Reader(gaf_shp)
     gaf_feature = ShapelyFeature(reader.geometries(), ccrs.PlateCarree(), 
                      facecolor='none', edgecolor='black', linewidth=0.7)
-    ax.add_feature(gaf_feature, zorder=221)
+    ax.add_feature(gaf_feature, zorder=z_gaf)
     
     # Set extent
     ax.set_extent([lon_min, lon_max, lat_min, lat_max], crs=ccrs.PlateCarree())
@@ -777,13 +845,38 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         colors='black',
         linewidths=1,
         alpha=0.3,
-        zorder=5,
+        zorder=z_mslp,
     )
     mslp_labels = ax.clabel(cs_mslp, inline=True, fontsize=8)
     for label in mslp_labels:
         label.set_alpha(0.3)
+
+    if ts_severe_profile:
+        # Plot 250 hPa isotachs for severe storm potential context.
+        u_250 = get_isobaric_field(data['u-component_of_wind_isobaric'], 25000)
+        v_250 = get_isobaric_field(data['v-component_of_wind_isobaric'], 25000)
+        wind_250_kt = np.sqrt(u_250.values**2 + v_250.values**2) * 1.94384
+        isotach_masked = np.where(wind_250_kt >= 80.0, wind_250_kt, np.nan)
+
+        isotach_levels = [80, 100, 120, 140, 160, 180, 300]
+        isotach_colors = ['#000080', '#ffff00', '#ff6600', '#ff0000', '#800000', '#ff00ff']
+        isotach_cmap = ListedColormap(isotach_colors)
+        isotach_norm = BoundaryNorm(isotach_levels, isotach_cmap.N, clip=False)
+
+        ax.contourf(
+            data.longitude,
+            data.latitude,
+            isotach_masked,
+            levels=isotach_levels,
+            cmap=isotach_cmap,
+            norm=isotach_norm,
+            alpha=0.5,
+            extend='max',
+            transform=ccrs.PlateCarree(),
+            zorder=6,
+        )
     
-    if not ts_flash_profile:
+    if layer_profile == 'bg':
         # Plot thickness (1000-500 hPa)
         hgt_1000 = get_isobaric_field(data['Geopotential_height_isobaric'], 100000) / 10  # Convert to dam
         hgt_500 = get_isobaric_field(data['Geopotential_height_isobaric'], 50000) / 10
@@ -798,11 +891,11 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         minor_only_levels = np.array([x for x in all_minor_levels if x not in major_levels_set])
 
         cs_thickness_minor = ax.contour(data.longitude, data.latitude, thickness, levels=minor_only_levels,
-                                         colors='red', linewidths=1, linestyles='dashed', zorder=6)
+                         colors='red', linewidths=1, linestyles='dashed', alpha=0.3, zorder=z_thickness)
 
         # Plot major interval lines (spacing of 18, blue)
         cs_thickness_major = ax.contour(data.longitude, data.latitude, thickness, levels=major_levels,
-                                         colors='blue', linewidths=1, linestyles='dashed', zorder=6)
+                         colors='blue', linewidths=1, linestyles='dashed', alpha=0.3, zorder=z_thickness)
         ax.clabel(cs_thickness_major, inline=True, fontsize=8, fmt='%d')
 
         # Plot low cloud layer (maxRH at 1000, 975, 950 hPa)
@@ -829,7 +922,7 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             alpha=0.7,
             extend='max',
             transform=ccrs.PlateCarree(),
-            zorder=2)
+            zorder=z_low_cloud)
 
         # Plot drizzle layer (average RH at 950, 900, 850 hPa)
         rh_950_drizzle = get_isobaric_field(data['Relative_humidity_isobaric'], 95000)
@@ -858,13 +951,111 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             alpha=1.0,
             extend='max',
             transform=ccrs.PlateCarree(),
-            zorder=4)
+            zorder=z_drizzle)
     
     # Calculate 10 m surface wind once for both fog logic and wind barbs
     u_wind = get_time_index(data['u-component_of_wind_height_above_ground'].sel(height_above_ground2=10))
     v_wind = get_time_index(data['v-component_of_wind_height_above_ground'].sel(height_above_ground2=10))
+
+    shear_u_ms = None
+    shear_v_ms = None
+    if ts_severe_profile:
+        u_500 = get_isobaric_field(data['u-component_of_wind_isobaric'], 50000)
+        v_500 = get_isobaric_field(data['v-component_of_wind_isobaric'], 50000)
+        shear_u_ms = u_500.values - u_wind.values
+        shear_v_ms = v_500.values - v_wind.values
+        shear_mag_ms = np.sqrt(shear_u_ms**2 + shear_v_ms**2)
+
+        if 'Convective_available_potential_energy_surface' in data:
+            sbcape = get_time_index(data['Convective_available_potential_energy_surface'])
+        else:
+            print('Warning: CAPE field missing; using zeros for SigHail')
+            sbcape = xr.zeros_like(u_wind)
+
+        if 'Pressure_surface' in data:
+            surface_pressure_hpa = get_time_index(data['Pressure_surface']) / 100.0
+        else:
+            print('Warning: Surface pressure missing; using MSLP proxy for SigHail mixing ratio')
+            surface_pressure_hpa = get_time_index(data['MSLP_Eta_model_reduction_msl']) / 100.0
+        td2m_c = get_time_index(data['Dewpoint_temperature_height_above_ground'].sel(height_above_ground4=2)) - 273.15
+        mixing_ratio = mixing_ratio_from_dewpoint_and_pressure(td2m_c.values, surface_pressure_hpa.values)
+
+        t700_c = get_isobaric_field(data['Temperature_isobaric'], 70000).values - 273.15
+        t500_c = get_isobaric_field(data['Temperature_isobaric'], 50000).values - 273.15
+        z700_km = get_isobaric_field(data['Geopotential_height_isobaric'], 70000).values / 1000.0
+        z500_km = get_isobaric_field(data['Geopotential_height_isobaric'], 50000).values / 1000.0
+
+        layer_dz_km = z700_km - z500_km
+        layer_dz_km = np.where(np.abs(layer_dz_km) < 1e-6, np.nan, layer_dz_km)
+
+        sighail = (
+            sbcape.values
+            * mixing_ratio
+            * 1000.0
+            * ((t700_c - t500_c) / layer_dz_km)
+            * t500_c
+            * shear_mag_ms
+        ) / 44000000.0
+
+        sighail_levels = [
+            0.0, 0.1, 0.2, 0.3, 0.4, 0.5,
+            0.6, 0.7, 0.8, 0.9, 1.0, 1.1,
+            1.2, 1.3, 1.4, 1.5, 1.6, 1.7,
+            1.8, 1.9, 2.0, 2.2, 2.4, 2.6,
+            2.8, 3.0, 3.5, 4.0, 5.0,
+        ]
+        sighail_interval_colors = [
+            (255, 255, 255, 0),
+            (97, 0, 97, 120),
+            (119, 0, 135, 120),
+            (128, 0, 206, 120),
+            (0, 127, 254, 120),
+            (0, 168, 254, 120),
+            (0, 208, 254, 120),
+            (0, 245, 254, 120),
+            (0, 254, 179, 120),
+            (0, 254, 70, 120),
+            (104, 254, 0, 120),
+            (165, 254, 0, 120),
+            (193, 254, 0, 120),
+            (221, 254, 0, 120),
+            (248, 254, 0, 120),
+            (254, 231, 0, 120),
+            (254, 202, 0, 120),
+            (254, 171, 0, 120),
+            (254, 140, 0, 120),
+            (254, 107, 0, 120),
+            (254, 70, 0, 120),
+            (254, 0, 0, 120),
+            (254, 77, 77, 120),
+            (254, 109, 109, 120),
+            (254, 132, 132, 120),
+            (254, 171, 171, 120),
+            (254, 210, 210, 120),
+            (254, 223, 223, 120),
+        ]
+        sighail_over_color = (254, 254, 254, 120)
+        sighail_colors_norm = [
+            (r / 255.0, g / 255.0, b / 255.0, a / 255.0)
+            for r, g, b, a in sighail_interval_colors
+        ]
+        sighail_cmap = ListedColormap(sighail_colors_norm)
+        sighail_cmap.set_over(tuple(channel / 255.0 for channel in sighail_over_color))
+        sighail_norm = BoundaryNorm(sighail_levels, sighail_cmap.N, clip=False)
+
+        ax.contourf(
+            data.longitude,
+            data.latitude,
+            sighail,
+            levels=sighail_levels,
+            cmap=sighail_cmap,
+            norm=sighail_norm,
+            extend='max',
+            transform=ccrs.PlateCarree(),
+            zorder=6.1,
+        )
     
-    if not ts_flash_profile:
+    if layer_profile == 'bg':
         # Plot fog layer using 2 m temperature/dewpoint spread and light surface winds
         temp_2m = get_time_index(data['Temperature_height_above_ground'].sel(height_above_ground3=2)) - 273.15
         dewpoint_2m = get_time_index(data['Dewpoint_temperature_height_above_ground'].sel(height_above_ground4=2)) - 273.15
@@ -892,7 +1083,7 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             norm=fog_norm,
             alpha=1.0,
             transform=ccrs.PlateCarree(),
-            zorder=3)
+            zorder=z_fog)
     
     # Plot 1hr precipitation / TS flash density field
     if ts_flash_profile:
@@ -970,6 +1161,12 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         ]
         precip_alpha = 1.0
         precip_zorder = 8
+    elif ts_severe_profile:
+        precip_masked = None
+        precip_levels = None
+        precip_colors = None
+        precip_alpha = None
+        precip_zorder = None
     else:
         precip = get_time_index(data['Precipitation_rate_surface']) * 3600  # Convert to mm/hr
         precip_masked = precip.where(precip >= 0.1, np.nan)
@@ -994,23 +1191,24 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             (50, 0, 0, 255),
         ]
         precip_alpha = 1.0
-        precip_zorder = 7
+        precip_zorder = z_bg_precip
 
-    precip_colors_norm = [(r / 255.0, g / 255.0, b / 255.0, a / 255.0) for r, g, b, a in precip_colors]
-    precip_cmap = ListedColormap(precip_colors_norm)
-    precip_norm = BoundaryNorm(precip_levels, precip_cmap.N, clip=True)
-    
-    cs_precip = ax.contourf(
-        data.longitude,
-        data.latitude,
-        precip_masked,
-        levels=precip_levels,
-        cmap=precip_cmap,
-        norm=precip_norm,
-        alpha=precip_alpha,
-        extend='max',
-        transform=ccrs.PlateCarree(),
-        zorder=precip_zorder)
+    if not ts_severe_profile:
+        precip_colors_norm = [(r / 255.0, g / 255.0, b / 255.0, a / 255.0) for r, g, b, a in precip_colors]
+        precip_cmap = ListedColormap(precip_colors_norm)
+        precip_norm = BoundaryNorm(precip_levels, precip_cmap.N, clip=True)
+
+        cs_precip = ax.contourf(
+            data.longitude,
+            data.latitude,
+            precip_masked,
+            levels=precip_levels,
+            cmap=precip_cmap,
+            norm=precip_norm,
+            alpha=precip_alpha,
+            extend='max',
+            transform=ccrs.PlateCarree(),
+            zorder=precip_zorder)
 
     if ts_flash_profile:
         # Add subtle dotted bin outlines to separate TS increments from background layers.
@@ -1020,21 +1218,52 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             data.latitude,
             precip_masked,
             levels=outline_levels,
-            colors=[(0.2, 0.2, 0.2, 1.0)],
+            colors=[(0.08, 0.08, 0.08, 1.0)],
             linewidths=0.35,
-            linestyles='dotted',
+            linestyles='dashed',
             transform=ccrs.PlateCarree(),
             zorder=precip_zorder + 0.1,
         )
+
+        # Draw the outer patch boundary so dashed lines appear on the edge of colored TS areas too.
+        patch_mask = np.isfinite(precip_masked).astype(float)
+        ax.contour(
+            data.longitude,
+            data.latitude,
+            patch_mask,
+            levels=[0.5],
+            colors=[(0.08, 0.08, 0.08, 1.0)],
+            linewidths=0.35,
+            linestyles='dashed',
+            transform=ccrs.PlateCarree(),
+            zorder=precip_zorder + 0.15,
+        )
     
-    # Plot SFC winds
-    ax.barbs(data.longitude[::10], data.latitude[::10], u_wind.values[::10, ::10], v_wind.values[::10, ::10], 
-             length=5, linewidth=0.5, color='#800000', alpha=0.3, zorder=6)
+    # Plot SFC winds unless explicitly disabled for severe-potential profile.
+    if not ts_severe_profile:
+        ax.barbs(data.longitude[::10], data.latitude[::10], u_wind.values[::10, ::10], v_wind.values[::10, ::10], 
+                 length=5, linewidth=0.5, color='#800000', alpha=0.3, zorder=(z_bg_barbs if bg_profile else 6))
+    else:
+        # Plot surface-to-500 hPa shear vectors as barbs in kt.
+        shear_u_kt = shear_u_ms * 1.94384
+        shear_v_kt = shear_v_ms * 1.94384
+
+        ax.barbs(
+            data.longitude[::10],
+            data.latitude[::10],
+            shear_u_kt[::10, ::10],
+            shear_v_kt[::10, ::10],
+            length=5,
+            linewidth=0.5,
+            color='#2b0000',
+            alpha=0.5,
+            zorder=6.2,
+        )
     
     # Plot TAF locations with filtering based on text bounding boxes
     if taf_lons:  # Only plot if TAF data was loaded successfully
         # Plot tiny dots to mark TAF locations
-        ax.scatter(taf_lons, taf_lats, s=2, c='black', marker='o', zorder=100, transform=ccrs.PlateCarree())
+        ax.scatter(taf_lons, taf_lats, s=2, c='black', marker='o', zorder=z_taf_points, transform=ccrs.PlateCarree())
         
         # Track which points to keep
         points_to_keep = []
@@ -1043,7 +1272,7 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         text_objects = []
         for idx, (lon, lat, name) in enumerate(zip(taf_lons, taf_lats, taf_names)):
             text_obj = ax.text(lon + TAF_LABEL_DX, lat + TAF_LABEL_DY, name, fontsize=5, ha='right', va='bottom', 
-                              zorder=101, transform=ccrs.PlateCarree())
+                              zorder=z_taf_text, transform=ccrs.PlateCarree())
             text_objects.append((text_obj, lon, lat, name, idx))
         
         # Draw canvas to compute text extents
@@ -1170,6 +1399,45 @@ def generate_gfs_ts_flash_frames(forecast_hours):
         publish_generated_frames(output_dir, generated_files, temp_dir)
 
 
+def generate_gfs_ts_severe_frames(forecast_hours):
+    output_dir = 'images/TS/Severe storm potential'
+    os.makedirs(output_dir, exist_ok=True)
+    latest_dataset, init_time = get_latest_gfs_dataset()
+
+    with tempfile.TemporaryDirectory(prefix='avmaps_ts_severe_') as temp_dir:
+        print(f'Generating {len(forecast_hours)} TS severe-potential frames in temporary workspace: {temp_dir}')
+        generated_files = []
+        prev_acpcp_values = None
+        last_generated_hour = None
+
+        for forecast_hour in forecast_hours:
+            print(f'\nGenerating TS severe-potential frame +{forecast_hour}hrs...')
+
+            use_prev = prev_acpcp_values is not None and last_generated_hour == forecast_hour - 1
+            data, init_time, prev_acpcp_values = get_gfs_data(
+                forecast_hour,
+                latest_dataset,
+                init_time,
+                include_ts_fields=True,
+                prev_acpcp_values=(prev_acpcp_values if use_prev else None),
+            )
+            last_generated_hour = forecast_hour
+            print('Using raw hourly GFS convective precipitation, Total Totals, and geometric vertical velocity fields')
+
+            fig = plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='ts_severe')
+
+            filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.png'
+            temp_filepath = os.path.join(temp_dir, filename)
+            fig.savefig(temp_filepath, dpi=150, bbox_inches='tight')
+            plt.close(fig)
+            generated_files.append(filename)
+
+            print(f'TS severe-potential map staged at {temp_filepath}')
+
+        print(f'\nFinished building {len(generated_files)} TS severe-potential frames. Publishing to {output_dir}...')
+        publish_generated_frames(output_dir, generated_files, temp_dir)
+
+
 def generate_icon_bg_frames(forecast_hours, preferred_run_time=None):
     output_dir = 'images/BG/ICON'
     os.makedirs(output_dir, exist_ok=True)
@@ -1216,7 +1484,7 @@ def generate_icon_bg_frames(forecast_hours, preferred_run_time=None):
 def main():
     parser = argparse.ArgumentParser(description='Generate BG forecast frames from GFS and/or ICON data.')
     parser.add_argument('--model', choices=['gfs', 'icon', 'both'], default='both')
-    parser.add_argument('--layer', choices=['bg', 'ts_flash'], default='bg')
+    parser.add_argument('--layer', choices=['bg', 'ts_flash', 'ts_severe'], default='bg')
     parser.add_argument('--start-hour', type=int, default=9)
     parser.add_argument('--end-hour', type=int, default=35)
     args = parser.parse_args()
@@ -1227,6 +1495,12 @@ def main():
         if args.model != 'gfs':
             raise ValueError('The ts_flash layer is currently supported for GFS only')
         generate_gfs_ts_flash_frames(forecast_hours)
+        return
+
+    if args.layer == 'ts_severe':
+        if args.model != 'gfs':
+            raise ValueError('The ts_severe layer is currently supported for GFS only')
+        generate_gfs_ts_severe_frames(forecast_hours)
         return
 
     gfs_run_time = None
