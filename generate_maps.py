@@ -81,6 +81,78 @@ def get_isobaric_field(data_var, target_pa):
     return get_time_index(data_var.sel(isobaric=target_pa, method='nearest'))
 
 
+def dewpoint_from_temperature_and_rh(temp_k, rh_percent):
+    """Return dewpoint in Celsius from temperature (K) and relative humidity (%)."""
+    temp_c = temp_k - 273.15
+    rh_clipped = np.clip(rh_percent, 1e-6, 100.0)
+    a = 17.625
+    b = 243.04
+    gamma = np.log(rh_clipped / 100.0) + (a * temp_c) / (b + temp_c)
+    return (b * gamma) / (a - gamma)
+
+
+def calculate_total_totals(data):
+    """Return the Total Totals index in degrees Celsius."""
+    temp_850 = get_isobaric_field(data['Temperature_isobaric'], 85000)
+    temp_500 = get_isobaric_field(data['Temperature_isobaric'], 50000)
+    rh_850 = get_isobaric_field(data['Relative_humidity_isobaric'], 85000)
+
+    td_850_c = dewpoint_from_temperature_and_rh(temp_850.values, rh_850.values)
+    t_850_c = temp_850.values - 273.15
+    t_500_c = temp_500.values - 273.15
+    return t_850_c + td_850_c - 2.0 * t_500_c
+
+
+def get_max_geometric_vertical_velocity(data, pressure_levels_pa):
+    """Return the maximum geometric vertical velocity (m/s) across the requested levels."""
+    level_values = [
+        get_isobaric_field(data['Geometric_vertical_velocity_isobaric'], level).values
+        for level in pressure_levels_pa
+    ]
+    return np.max(np.stack(level_values, axis=0), axis=0)
+
+
+def get_gfs_convective_precip_accumulation(forecast_hour, init_time):
+    """Fetch accumulated convective precipitation (kg/m^2 ~= mm) for one forecast hour."""
+    run_date = init_time.strftime('%Y%m%d')
+    run_cycle = init_time.strftime('%H')
+    grib_file = f'gfs.t{run_cycle}z.pgrb2.0p25.f{forecast_hour:03d}'
+
+    params = {
+        'file': grib_file,
+        'dir': f'/gfs.{run_date}/{run_cycle}/atmos',
+        'subregion': '',
+        'leftlon': str(lon_min),
+        'rightlon': str(lon_max),
+        'toplat': str(lat_max),
+        'bottomlat': str(lat_min),
+        'var_ACPCP': 'on',
+        'lev_surface': 'on',
+    }
+
+    response = requests.get(
+        'https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl',
+        params=params,
+        timeout=240,
+    )
+    response.raise_for_status()
+
+    with tempfile.NamedTemporaryFile(suffix='.grib2', delete=False) as temp_grib:
+        temp_grib.write(response.content)
+        temp_grib_path = temp_grib.name
+
+    try:
+        ds_surface_accum = xr.open_dataset(
+            temp_grib_path,
+            engine='cfgrib',
+            backend_kwargs={'filter_by_keys': {'typeOfLevel': 'surface', 'stepType': 'accum'}, 'indexpath': ''},
+        )
+        ds_surface_accum = ds_surface_accum.load()
+        return ds_surface_accum['acpcp'].values
+    finally:
+        safe_remove_file(temp_grib_path)
+
+
 def get_day_night_grid(valid_time, lons, lats):
     """Return solar-zenith proxy and night mask for a given UTC valid time."""
     day_of_year = valid_time.timetuple().tm_yday
@@ -157,7 +229,7 @@ def get_latest_gfs_dataset():
     return latest_dataset, init_time
 
 
-def get_gfs_data(forecast_hour=9, latest_dataset=None, init_time=None):
+def get_gfs_data(forecast_hour=9, latest_dataset=None, init_time=None, include_ts_fields=False, prev_acpcp_values=None):
     if latest_dataset is None or init_time is None:
         latest_dataset, init_time = get_latest_gfs_dataset()
 
@@ -196,6 +268,16 @@ def get_gfs_data(forecast_hour=9, latest_dataset=None, init_time=None):
         'lev_10_m_above_ground': 'on',
     }
 
+    if include_ts_fields:
+        params.update({
+            'var_ACPCP': 'on',
+            'var_DZDT': 'on',
+            'lev_600_mb': 'on',
+            'lev_400_mb': 'on',
+            'lev_300_mb': 'on',
+            'lev_250_mb': 'on',
+        })
+
     response = requests.get(
         'https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl',
         params=params,
@@ -224,6 +306,13 @@ def get_gfs_data(forecast_hour=9, latest_dataset=None, init_time=None):
             engine='cfgrib',
             backend_kwargs={'filter_by_keys': {'typeOfLevel': 'surface', 'stepType': 'instant'}, 'indexpath': ''},
         )
+        ds_surface_accum = None
+        if include_ts_fields and forecast_hour > 0:
+            ds_surface_accum = xr.open_dataset(
+                temp_grib_path,
+                engine='cfgrib',
+                backend_kwargs={'filter_by_keys': {'typeOfLevel': 'surface', 'stepType': 'accum'}, 'indexpath': ''},
+            )
         ds_isobaric = xr.open_dataset(
             temp_grib_path,
             engine='cfgrib',
@@ -242,6 +331,8 @@ def get_gfs_data(forecast_hour=9, latest_dataset=None, init_time=None):
 
         ds_msl = ds_msl.load()
         ds_surface = ds_surface.load()
+        if ds_surface_accum is not None:
+            ds_surface_accum = ds_surface_accum.load()
         ds_isobaric = ds_isobaric.load()
         ds_2m = ds_2m.load()
         ds_10m = ds_10m.load()
@@ -260,22 +351,45 @@ def get_gfs_data(forecast_hour=9, latest_dataset=None, init_time=None):
         t2m = ds_2m['t2m'].expand_dims({'height_above_ground3': [2]})
         d2m = ds_2m['d2m'].expand_dims({'height_above_ground4': [2]})
 
+        dataset_vars = {
+            'MSLP_Eta_model_reduction_msl': ds_msl['prmsl'],
+            'Geopotential_height_isobaric': ds_isobaric['gh'],
+            'Geopotential_height_surface': ds_surface['orog'],
+            'Precipitation_rate_surface': ds_surface['prate'],
+            'u-component_of_wind_height_above_ground': u10,
+            'v-component_of_wind_height_above_ground': v10,
+            'Relative_humidity_isobaric': ds_isobaric['r'],
+            'Temperature_isobaric': ds_isobaric['t'],
+            'Temperature_height_above_ground': t2m,
+            'Dewpoint_temperature_height_above_ground': d2m,
+        }
+
+        if 'wz' in ds_isobaric.data_vars:
+            dataset_vars['Geometric_vertical_velocity_isobaric'] = ds_isobaric['wz']
+
+        if include_ts_fields:
+            if forecast_hour == 0:
+                acpcp_1h = np.zeros_like(ds_surface['prate'].values)
+                current_acpcp_values = np.zeros_like(ds_surface['prate'].values)
+            else:
+                current_acpcp_values = ds_surface_accum['acpcp'].values
+                if prev_acpcp_values is None:
+                    prev_acpcp_values = get_gfs_convective_precip_accumulation(forecast_hour - 1, init_time)
+                acpcp_1h = np.maximum(current_acpcp_values - prev_acpcp_values, 0.0)
+
+            dataset_vars['Convective_precipitation_1h_surface'] = (
+                ('latitude', 'longitude'),
+                acpcp_1h,
+            )
+        else:
+            current_acpcp_values = None
+
         ds = xr.Dataset(
-            {
-                'MSLP_Eta_model_reduction_msl': ds_msl['prmsl'],
-                'Geopotential_height_isobaric': ds_isobaric['gh'],
-                'Geopotential_height_surface': ds_surface['orog'],
-                'Precipitation_rate_surface': ds_surface['prate'],
-                'u-component_of_wind_height_above_ground': u10,
-                'v-component_of_wind_height_above_ground': v10,
-                'Relative_humidity_isobaric': ds_isobaric['r'],
-                'Temperature_height_above_ground': t2m,
-                'Dewpoint_temperature_height_above_ground': d2m,
-            }
+            dataset_vars
         )
 
         ds = ds.load()
-        return ds, init_time
+        return ds, init_time, current_acpcp_values
     finally:
         safe_remove_file(temp_grib_path)
 
@@ -655,8 +769,19 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
     
     # Plot MSLP
     mslp = get_time_index(data['MSLP_Eta_model_reduction_msl']) / 100  # Convert to hPa
-    cs_mslp = ax.contour(data.longitude, data.latitude, mslp, levels=np.arange(980, 1040, 4), colors='black', linewidths=1, zorder=5)
-    ax.clabel(cs_mslp, inline=True, fontsize=8)
+    cs_mslp = ax.contour(
+        data.longitude,
+        data.latitude,
+        mslp,
+        levels=np.arange(980, 1040, 4),
+        colors='black',
+        linewidths=1,
+        alpha=0.3,
+        zorder=5,
+    )
+    mslp_labels = ax.clabel(cs_mslp, inline=True, fontsize=8)
+    for label in mslp_labels:
+        label.set_alpha(0.3)
     
     if not ts_flash_profile:
         # Plot thickness (1000-500 hPa)
@@ -769,36 +894,109 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             transform=ccrs.PlateCarree(),
             zorder=3)
     
-    # Plot 1hr precipitation with custom colormap from XML
-    precip = get_time_index(data['Precipitation_rate_surface']) * 3600  # Convert to mm/hr
-    
-    # Mask out precipitation below 0.1 mm/hr to show low clouds underneath
-    precip_masked = precip.where(precip >= 0.1, np.nan)
-    
-    # Precipitation levels and colors from 1hrprecip.xml
-    precip_levels = [0, 0.1, 0.2, 0.5, 1, 2, 5, 7.5, 10, 15, 20, 25, 30, 35, 40, 45, 50]
-    precip_colors = [
-        (255, 255, 255),  # 0 - white
-        (240, 255, 150),  # 0.1 - light yellow
-        (240, 255, 60),   # 0.2 - bright yellow
-        (255, 255, 0),    # 0.5 - yellow
-        (200, 255, 0),    # 1 - yellow-green
-        (150, 255, 0),    # 2 - light green
-        (0, 150, 0),      # 5 - green
-        (0, 175, 128),    # 7.5 - teal
-        (0, 200, 255),    # 10 - light cyan
-        (0, 150, 255),    # 15 - cyan
-        (0, 0, 255),      # 20 - blue
-        (0, 0, 255),      # 25 - blue
-        (255, 100, 0),    # 30 - orange
-        (255, 50, 0),     # 35 - orange-red
-        (255, 0, 0),      # 40 - red
-        (200, 0, 0),      # 45 - dark red
-        (50, 0, 0)        # 50 - maroon
-    ]
-    
-    # Normalize RGB values to 0-1 range
-    precip_colors_norm = [(r/255.0, g/255.0, b/255.0) for r, g, b in precip_colors]
+    # Plot 1hr precipitation / TS flash density field
+    if ts_flash_profile:
+        base_precip = get_time_index(data['Precipitation_rate_surface']) * 3600  # Convert to mm/hr
+        base_precip_masked = base_precip.where(base_precip >= 0.1, np.nan)
+        base_precip_levels = [0, 0.1, 0.2, 0.5, 1, 2, 5, 7.5, 10, 15, 20, 25, 30, 35, 40, 45, 50]
+        base_precip_colors = [
+            (255, 255, 255, 255),
+            (240, 255, 150, 255),
+            (240, 255, 60, 255),
+            (255, 255, 0, 255),
+            (200, 255, 0, 255),
+            (150, 255, 0, 255),
+            (0, 150, 0, 255),
+            (0, 175, 128, 255),
+            (0, 200, 255, 255),
+            (0, 150, 255, 255),
+            (0, 0, 255, 255),
+            (0, 0, 255, 255),
+            (255, 100, 0, 255),
+            (255, 50, 0, 255),
+            (255, 0, 0, 255),
+            (200, 0, 0, 255),
+            (50, 0, 0, 255),
+        ]
+        base_precip_colors_norm = [(r / 255.0, g / 255.0, b / 255.0, a / 255.0) for r, g, b, a in base_precip_colors]
+        base_precip_cmap = ListedColormap(base_precip_colors_norm)
+        base_precip_norm = BoundaryNorm(base_precip_levels, base_precip_cmap.N, clip=True)
+
+        ax.contourf(
+            data.longitude,
+            data.latitude,
+            base_precip_masked,
+            levels=base_precip_levels,
+            cmap=base_precip_cmap,
+            norm=base_precip_norm,
+            alpha=0.3,
+            extend='max',
+            transform=ccrs.PlateCarree(),
+            zorder=7)
+
+        total_totals = calculate_total_totals(data)
+        max_wz = get_max_geometric_vertical_velocity(data, [60000, 50000, 40000, 30000, 25000])
+        convective_precip = data['Convective_precipitation_1h_surface']
+        ts_mask = (total_totals > 45.0) & (max_wz > 0.1)
+
+        print(f'Total Totals > 45 grid points: {np.sum(total_totals > 45.0)}')
+        print(f'Max geometric vertical velocity > 0.1 m/s grid points: {np.sum(max_wz > 0.1)}')
+        print(f'Combined TS mask grid points: {np.sum(ts_mask)}')
+
+        precip_masked = np.where(ts_mask & (convective_precip.values >= 0.1), convective_precip.values, np.nan)
+        precip_levels = [0, 0.1, 0.3, 0.5, 1.0, 2.5, 5.0, 7.5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 100, 300]
+        precip_colors = [
+            (255, 255, 255, 0),      # 0-0.1mm (transparent)
+            (0, 255, 0, 255),        # 0.1-0.3mm (#00FF00)
+            (128, 255, 0, 255),      # 0.3-0.5mm (#80FF00)
+            (255, 251, 0, 255),      # 0.5-1.0mm (#FFFB00)
+            (255, 240, 0, 255),      # 1.0-2.5mm (#FFF000)
+            (255, 218, 0, 255),      # 2.5-5.0mm (#FFDA00)
+            (255, 153, 0, 255),      # 5.0-7.5mm (#FF9900)
+            (255, 115, 0, 255),      # 7.5-10mm (#FF7300)
+            (255, 76, 0, 255),       # 10-15mm (#FF4C00)
+            (255, 0, 0, 255),        # 15-20mm (#FF0000)
+            (255, 32, 110, 255),     # 20-25mm (existing palette)
+            (255, 32, 121, 255),     # 25-30mm (existing palette)
+            (255, 34, 159, 255),     # 30-35mm (existing palette)
+            (255, 30, 184, 255),     # 35-40mm (existing palette)
+            (255, 32, 214, 255),     # 40-45mm (existing palette)
+            (236, 32, 255, 255),     # 45-50mm (existing palette)
+            (192, 32, 255, 255),     # 50-55mm (existing palette)
+            (144, 33, 255, 255),     # 55-60mm (existing palette)
+            (101, 29, 255, 255),     # 60-100mm (existing palette)
+            (28, 20, 255, 255),      # 100-300mm (existing palette)
+            (14, 255, 235, 255),     # 300+mm (existing palette)
+        ]
+        precip_alpha = 1.0
+        precip_zorder = 8
+    else:
+        precip = get_time_index(data['Precipitation_rate_surface']) * 3600  # Convert to mm/hr
+        precip_masked = precip.where(precip >= 0.1, np.nan)
+        precip_levels = [0, 0.1, 0.2, 0.5, 1, 2, 5, 7.5, 10, 15, 20, 25, 30, 35, 40, 45, 50]
+        precip_colors = [
+            (255, 255, 255, 255),
+            (240, 255, 150, 255),
+            (240, 255, 60, 255),
+            (255, 255, 0, 255),
+            (200, 255, 0, 255),
+            (150, 255, 0, 255),
+            (0, 150, 0, 255),
+            (0, 175, 128, 255),
+            (0, 200, 255, 255),
+            (0, 150, 255, 255),
+            (0, 0, 255, 255),
+            (0, 0, 255, 255),
+            (255, 100, 0, 255),
+            (255, 50, 0, 255),
+            (255, 0, 0, 255),
+            (200, 0, 0, 255),
+            (50, 0, 0, 255),
+        ]
+        precip_alpha = 1.0
+        precip_zorder = 7
+
+    precip_colors_norm = [(r / 255.0, g / 255.0, b / 255.0, a / 255.0) for r, g, b, a in precip_colors]
     precip_cmap = ListedColormap(precip_colors_norm)
     precip_norm = BoundaryNorm(precip_levels, precip_cmap.N, clip=True)
     
@@ -809,14 +1007,29 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         levels=precip_levels,
         cmap=precip_cmap,
         norm=precip_norm,
-        alpha=0.3 if ts_flash_profile else 1.0,
+        alpha=precip_alpha,
         extend='max',
         transform=ccrs.PlateCarree(),
-        zorder=6)
+        zorder=precip_zorder)
+
+    if ts_flash_profile:
+        # Add subtle dotted bin outlines to separate TS increments from background layers.
+        outline_levels = precip_levels[1:-1]
+        ax.contour(
+            data.longitude,
+            data.latitude,
+            precip_masked,
+            levels=outline_levels,
+            colors=[(0.45, 0.45, 0.45, 0.65)],
+            linewidths=0.35,
+            linestyles='dotted',
+            transform=ccrs.PlateCarree(),
+            zorder=precip_zorder + 0.1,
+        )
     
     # Plot SFC winds
     ax.barbs(data.longitude[::10], data.latitude[::10], u_wind.values[::10, ::10], v_wind.values[::10, ::10], 
-             length=5, linewidth=0.5, color='#800000', zorder=7)
+             length=5, linewidth=0.5, color='#800000', alpha=0.3, zorder=6)
     
     # Plot TAF locations with filtering based on text bounding boxes
     if taf_lons:  # Only plot if TAF data was loaded successfully
@@ -900,7 +1113,7 @@ def generate_gfs_bg_frames(forecast_hours):
             print(f'\nGenerating frame +{forecast_hour}hrs...')
 
             # Get raw hourly data from NOMADS GFS 0.25 files.
-            data, init_time = get_gfs_data(forecast_hour, latest_dataset, init_time)
+            data, init_time, _ = get_gfs_data(forecast_hour, latest_dataset, init_time)
             print('Using raw hourly GFS 0.25 model fields')
 
             # Plot map
@@ -915,6 +1128,45 @@ def generate_gfs_bg_frames(forecast_hours):
             print(f'Map staged at {temp_filepath}')
 
         print(f'\nFinished building {len(generated_files)} frames. Publishing to {output_dir}...')
+        publish_generated_frames(output_dir, generated_files, temp_dir)
+
+
+def generate_gfs_ts_flash_frames(forecast_hours):
+    output_dir = 'images/TS/Flash density'
+    os.makedirs(output_dir, exist_ok=True)
+    latest_dataset, init_time = get_latest_gfs_dataset()
+
+    with tempfile.TemporaryDirectory(prefix='avmaps_ts_flash_') as temp_dir:
+        print(f'Generating {len(forecast_hours)} TS flash-density frames in temporary workspace: {temp_dir}')
+        generated_files = []
+        prev_acpcp_values = None
+        last_generated_hour = None
+
+        for forecast_hour in forecast_hours:
+            print(f'\nGenerating TS flash-density frame +{forecast_hour}hrs...')
+
+            use_prev = prev_acpcp_values is not None and last_generated_hour == forecast_hour - 1
+            data, init_time, prev_acpcp_values = get_gfs_data(
+                forecast_hour,
+                latest_dataset,
+                init_time,
+                include_ts_fields=True,
+                prev_acpcp_values=(prev_acpcp_values if use_prev else None),
+            )
+            last_generated_hour = forecast_hour
+            print('Using raw hourly GFS convective precipitation, Total Totals, and geometric vertical velocity fields')
+
+            fig = plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='ts_flash')
+
+            filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.png'
+            temp_filepath = os.path.join(temp_dir, filename)
+            fig.savefig(temp_filepath, dpi=150, bbox_inches='tight')
+            plt.close(fig)
+            generated_files.append(filename)
+
+            print(f'TS flash-density map staged at {temp_filepath}')
+
+        print(f'\nFinished building {len(generated_files)} TS flash-density frames. Publishing to {output_dir}...')
         publish_generated_frames(output_dir, generated_files, temp_dir)
 
 
@@ -964,11 +1216,18 @@ def generate_icon_bg_frames(forecast_hours, preferred_run_time=None):
 def main():
     parser = argparse.ArgumentParser(description='Generate BG forecast frames from GFS and/or ICON data.')
     parser.add_argument('--model', choices=['gfs', 'icon', 'both'], default='both')
+    parser.add_argument('--layer', choices=['bg', 'ts_flash'], default='bg')
     parser.add_argument('--start-hour', type=int, default=9)
     parser.add_argument('--end-hour', type=int, default=35)
     args = parser.parse_args()
 
     forecast_hours = list(range(args.start_hour, args.end_hour + 1))
+
+    if args.layer == 'ts_flash':
+        if args.model != 'gfs':
+            raise ValueError('The ts_flash layer is currently supported for GFS only')
+        generate_gfs_ts_flash_frames(forecast_hours)
+        return
 
     gfs_run_time = None
     if args.model in ('gfs', 'both'):
