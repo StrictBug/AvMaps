@@ -1020,7 +1020,7 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             data.latitude,
             precip_masked,
             levels=outline_levels,
-            colors=[(0.45, 0.45, 0.45, 1.0)],
+            colors=[(0.2, 0.2, 0.2, 1.0)],
             linewidths=0.35,
             linestyles='dotted',
             transform=ccrs.PlateCarree(),
