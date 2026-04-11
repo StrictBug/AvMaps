@@ -1,2 +1,5 @@
 cd /workspaces/AvMaps
+python3 generate_maps.py --model both --layer bg --start-hour 9 --end-hour 35
+python3 generate_maps.py --model gfs --layer ts_flash --start-hour 9 --end-hour 35
+python3 generate_maps.py --model gfs --layer ts_severe --start-hour 9 --end-hour 35
 python3 -m http.server 8000

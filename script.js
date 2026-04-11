@@ -1,8 +1,8 @@
 // Configuration object defining image categories and their subfolder pairs
 const imageConfig = {
     'Airmass': {
-        left: { folder: 'FZL', title: 'FZL', prefix: 'AIRMASSFZL' },
-        right: { folder: 'Snow level', title: 'Snow Level', prefix: 'AIRMASSSL' }
+        left: { folder: 'FZL', title: 'FZL', prefix: 'AIRMASSFZL', extension: 'png' },
+        right: { folder: 'Snow level', title: 'Snow Level', prefix: 'AIRMASSSL', extension: 'png' }
     },
     'BG': {
         left: { folder: 'US', title: 'US', prefix: '' },
@@ -28,6 +28,7 @@ let animationInterval = null;
 let animationSpeed = 500; // milliseconds
 let bgFramePairs = [];
 let tsFramePairs = [];
+let airmassFramePairs = [];
 
 // DOM elements
 let frameSlider, leftImage, rightImage;
@@ -148,11 +149,44 @@ async function ensureTsFramesLoaded(forceRefresh = false) {
     return tsFramePairs;
 }
 
+async function discoverAirmassFrames() {
+    const fzlFrames = await discoverBgFramesForDirectory('images/Airmass/FZL');
+    const snowFrames = await discoverBgFramesForDirectory('images/Airmass/Snow level');
+
+    const fzlByHour = new Map(fzlFrames.map(frame => [frame.hour, frame.path]));
+    const snowByHour = new Map(snowFrames.map(frame => [frame.hour, frame.path]));
+
+    const commonHours = Array.from(fzlByHour.keys())
+        .filter(hour => snowByHour.has(hour))
+        .sort((a, b) => a - b);
+
+    const framePairs = commonHours.map(hour => ({
+        hour,
+        leftPath: fzlByHour.get(hour),
+        rightPath: snowByHour.get(hour)
+    }));
+
+    if (framePairs.length === 0) {
+        throw new Error('No overlapping Airmass FZL/Snow frame hours found');
+    }
+
+    return framePairs;
+}
+
+async function ensureAirmassFramesLoaded(forceRefresh = false) {
+    if (forceRefresh || airmassFramePairs.length === 0) {
+        airmassFramePairs = await discoverAirmassFrames();
+    }
+    return airmassFramePairs;
+}
+
 function setMaxFramesForCategory(category) {
     if (category === 'BG' && bgFramePairs.length > 0) {
         maxFrames = bgFramePairs.length;
     } else if (category === 'TS' && tsFramePairs.length > 0) {
         maxFrames = tsFramePairs.length;
+    } else if (category === 'Airmass' && airmassFramePairs.length > 0) {
+        maxFrames = airmassFramePairs.length;
     } else {
         maxFrames = DEFAULT_MAX_FRAMES;
     }
@@ -171,6 +205,10 @@ function initializeElements() {
     speedSlider = document.getElementById('speed-slider');
     speedDisplay = document.getElementById('speed-display');
     categoryButtons = document.querySelectorAll('.category-btn');
+}
+
+function getPanelExtension(panelConfig) {
+    return panelConfig.extension || 'jpeg';
 }
 
 function setupEventListeners() {
@@ -321,6 +359,13 @@ async function loadCategory(category) {
             console.warn('Could not dynamically discover TS files, using existing frame count.', error);
             tsFramePairs = [];
         }
+    } else if (category === 'Airmass') {
+        try {
+            await ensureAirmassFramesLoaded(true);
+        } catch (error) {
+            console.warn('Could not dynamically discover Airmass FZL/Snow files, using existing frame count.', error);
+            airmassFramePairs = [];
+        }
     }
     
     setMaxFramesForCategory(category);
@@ -373,6 +418,26 @@ function updateImages() {
         rightImage.alt = `Severe Storm Potential - Hour ${frameHour}`;
         return;
     }
+
+    if (currentCategory === 'Airmass') {
+        if (airmassFramePairs.length === 0) {
+            console.warn('No Airmass frame pairs available to display.');
+            return;
+        }
+
+        const framePair = airmassFramePairs[currentFrame - 1];
+        const frameHour = framePair.hour;
+
+        leftImage.classList.remove('error');
+        rightImage.classList.remove('error');
+
+        leftImage.src = framePair.leftPath;
+        rightImage.src = framePair.rightPath;
+
+        leftImage.alt = `FZL - Hour ${frameHour}`;
+        rightImage.alt = `Snow Level - Hour ${frameHour}`;
+        return;
+    }
     
     const frameNumber = currentFrame.toString().padStart(3, '0');
     
@@ -381,8 +446,10 @@ function updateImages() {
     rightImage.classList.remove('error');
     
     // Update image sources
-    leftImage.src = `images/${currentCategory}/${config.left.folder}/${config.left.prefix}${frameNumber}.jpeg`;
-    rightImage.src = `images/${currentCategory}/${config.right.folder}/${config.right.prefix}${frameNumber}.jpeg`;
+    const leftExt = getPanelExtension(config.left);
+    const rightExt = getPanelExtension(config.right);
+    leftImage.src = `images/${currentCategory}/${config.left.folder}/${config.left.prefix}${frameNumber}.${leftExt}`;
+    rightImage.src = `images/${currentCategory}/${config.right.folder}/${config.right.prefix}${frameNumber}.${rightExt}`;
     
     leftImage.alt = `${config.left.title} - Frame ${currentFrame}`;
     rightImage.alt = `${config.right.title} - Frame ${currentFrame}`;
@@ -445,17 +512,30 @@ function preloadImages(category) {
         });
         return;
     }
+
+    if (category === 'Airmass') {
+        airmassFramePairs.forEach(framePair => {
+            const leftImg = new Image();
+            leftImg.src = framePair.leftPath;
+
+            const rightImg = new Image();
+            rightImg.src = framePair.rightPath;
+        });
+        return;
+    }
     
     for (let i = 1; i <= DEFAULT_MAX_FRAMES; i++) {
         const frameNumber = i.toString().padStart(3, '0');
+        const leftExt = getPanelExtension(config.left);
+        const rightExt = getPanelExtension(config.right);
         
         // Preload left images
         const leftImg = new Image();
-        leftImg.src = `images/${category}/${config.left.folder}/${config.left.prefix}${frameNumber}.jpeg`;
+        leftImg.src = `images/${category}/${config.left.folder}/${config.left.prefix}${frameNumber}.${leftExt}`;
         
         // Preload right images
         const rightImg = new Image();
-        rightImg.src = `images/${category}/${config.right.folder}/${config.right.prefix}${frameNumber}.jpeg`;
+        rightImg.src = `images/${category}/${config.right.folder}/${config.right.prefix}${frameNumber}.${rightExt}`;
     }
 }
 
@@ -472,6 +552,12 @@ window.addEventListener('load', async function() {
         await ensureTsFramesLoaded();
     } catch (error) {
         console.warn('Could not preload TS frames dynamically:', error);
+    }
+
+    try {
+        await ensureAirmassFramesLoaded();
+    } catch (error) {
+        console.warn('Could not preload Airmass frames dynamically:', error);
     }
 
     // Preload images for all categories

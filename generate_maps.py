@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import BoundaryNorm, ListedColormap
 import argparse
 import bz2
+import cfgrib
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from cartopy.io.shapereader import Reader, natural_earth
@@ -91,6 +92,25 @@ def dewpoint_from_temperature_and_rh(temp_k, rh_percent):
     return (b * gamma) / (a - gamma)
 
 
+def relative_humidity_from_temperature_and_dewpoint(temp_c, dewpoint_c):
+    """Return relative humidity (%) from temperature and dewpoint in Celsius."""
+    es = 6.112 * np.exp((17.67 * temp_c) / (temp_c + 243.5))
+    e = 6.112 * np.exp((17.67 * dewpoint_c) / (dewpoint_c + 243.5))
+    return np.clip(100.0 * e / np.maximum(es, 1e-6), 1e-6, 100.0)
+
+
+def wet_bulb_temperature_from_temperature_and_rh(temp_c, rh_percent):
+    """Return wet-bulb temperature (C) using the Stull approximation."""
+    rh = np.clip(rh_percent, 1e-6, 100.0)
+    return (
+        temp_c * np.arctan(0.151977 * np.sqrt(rh + 8.313659))
+        + np.arctan(temp_c + rh)
+        - np.arctan(rh - 1.676331)
+        + 0.00391838 * np.power(rh, 1.5) * np.arctan(0.023101 * rh)
+        - 4.686035
+    )
+
+
 def mixing_ratio_from_dewpoint_and_pressure(td_c, pressure_hpa):
     """Return humidity mixing ratio (kg/kg) from dewpoint (C) and pressure (hPa)."""
     vapor_pressure_hpa = 6.112 * np.exp((17.67 * td_c) / (td_c + 243.5))
@@ -109,6 +129,169 @@ def calculate_total_totals(data):
     t_850_c = temp_850.values - 273.15
     t_500_c = temp_500.values - 273.15
     return t_850_c + td_850_c - 2.0 * t_500_c
+
+
+def calculate_freezing_level_height_ft(data):
+    """Return freezing level height (ft AMSL), interpolated from available levels."""
+    temp_isobaric = get_time_index(data['Temperature_isobaric']) - 273.15
+    hgt_isobaric = get_time_index(data['Geopotential_height_isobaric'])
+
+    pressures = temp_isobaric['isobaric'].values
+    sort_idx = np.argsort(pressures)[::-1]  # Surface-near first
+
+    temp_surface = get_time_index(data['Temperature_height_above_ground'].sel(height_above_ground3=2)) - 273.15
+    hgt_surface = get_time_index(data['Geopotential_height_surface'])
+
+    temp_stack = np.concatenate([temp_surface.values[np.newaxis, :, :], temp_isobaric.values[sort_idx, :, :]], axis=0)
+    hgt_stack = np.concatenate([hgt_surface.values[np.newaxis, :, :], hgt_isobaric.values[sort_idx, :, :]], axis=0)
+
+    freezing_level_m = np.full(temp_surface.values.shape, np.nan, dtype=float)
+
+    # If the surface is already at/below freezing, the freezing level is at the surface.
+    surface_below_freezing = temp_stack[0] <= 0.0
+    freezing_level_m[surface_below_freezing] = hgt_stack[0][surface_below_freezing]
+
+    for k in range(temp_stack.shape[0] - 1):
+        t_lo = temp_stack[k]
+        t_hi = temp_stack[k + 1]
+        z_lo = hgt_stack[k]
+        z_hi = hgt_stack[k + 1]
+
+        crossing = ((t_lo >= 0.0) & (t_hi <= 0.0)) | ((t_lo <= 0.0) & (t_hi >= 0.0))
+        crossing &= np.isfinite(t_lo) & np.isfinite(t_hi) & np.isfinite(z_lo) & np.isfinite(z_hi)
+        crossing &= np.abs(t_hi - t_lo) > 1e-6
+
+        unresolved = ~np.isfinite(freezing_level_m)
+        use = unresolved & crossing
+        if not np.any(use):
+            continue
+
+        frac = (0.0 - t_lo) / (t_hi - t_lo)
+        z_cross = z_lo + frac * (z_hi - z_lo)
+        freezing_level_m[use] = z_cross[use]
+
+    return freezing_level_m * 3.28084
+
+
+def calculate_freezing_layer_mask(data):
+    """Return mask where a column has multiple 0C crossings (a freezing layer aloft)."""
+    temp_isobaric_c = get_time_index(data['Temperature_isobaric']) - 273.15
+
+    pressures = temp_isobaric_c['isobaric'].values
+    sort_idx = np.argsort(pressures)[::-1]  # Surface-near first
+
+    temp_surface_c = get_time_index(data['Temperature_height_above_ground'].sel(height_above_ground3=2)) - 273.15
+    temp_stack = np.concatenate(
+        [temp_surface_c.values[np.newaxis, :, :], temp_isobaric_c.values[sort_idx, :, :]],
+        axis=0,
+    )
+
+    t_lo = temp_stack[:-1]
+    t_hi = temp_stack[1:]
+
+    crossings = ((t_lo <= 0.0) & (t_hi > 0.0)) | ((t_lo >= 0.0) & (t_hi < 0.0))
+    crossings &= np.isfinite(t_lo) & np.isfinite(t_hi)
+
+    crossing_count = np.sum(crossings, axis=0)
+    return crossing_count >= 2
+
+
+def calculate_wet_bulb_freezing_level_height_ft(data):
+    """Return wet-bulb freezing level height (ft AMSL), interpolated from profile levels."""
+    temp_isobaric_c = get_time_index(data['Temperature_isobaric']) - 273.15
+    rh_isobaric = get_time_index(data['Relative_humidity_isobaric'])
+    hgt_isobaric = get_time_index(data['Geopotential_height_isobaric'])
+
+    tw_isobaric_c = wet_bulb_temperature_from_temperature_and_rh(
+        temp_isobaric_c.values,
+        rh_isobaric.values,
+    )
+
+    pressures = temp_isobaric_c['isobaric'].values
+    sort_idx = np.argsort(pressures)[::-1]  # Surface-near first
+
+    temp_2m_c = get_time_index(data['Temperature_height_above_ground'].sel(height_above_ground3=2)) - 273.15
+    dewpoint_2m_c = get_time_index(data['Dewpoint_temperature_height_above_ground'].sel(height_above_ground4=2)) - 273.15
+    rh_2m = relative_humidity_from_temperature_and_dewpoint(temp_2m_c.values, dewpoint_2m_c.values)
+    tw_surface_c = wet_bulb_temperature_from_temperature_and_rh(temp_2m_c.values, rh_2m)
+    hgt_surface = get_time_index(data['Geopotential_height_surface'])
+
+    tw_stack = np.concatenate([tw_surface_c[np.newaxis, :, :], tw_isobaric_c[sort_idx, :, :]], axis=0)
+    hgt_stack = np.concatenate([hgt_surface.values[np.newaxis, :, :], hgt_isobaric.values[sort_idx, :, :]], axis=0)
+
+    wbfl_m = np.full(temp_2m_c.values.shape, np.nan, dtype=float)
+
+    surface_below_freezing = tw_stack[0] <= 0.0
+    wbfl_m[surface_below_freezing] = hgt_stack[0][surface_below_freezing]
+
+    for k in range(tw_stack.shape[0] - 1):
+        tw_lo = tw_stack[k]
+        tw_hi = tw_stack[k + 1]
+        z_lo = hgt_stack[k]
+        z_hi = hgt_stack[k + 1]
+
+        crossing = ((tw_lo >= 0.0) & (tw_hi <= 0.0)) | ((tw_lo <= 0.0) & (tw_hi >= 0.0))
+        crossing &= np.isfinite(tw_lo) & np.isfinite(tw_hi) & np.isfinite(z_lo) & np.isfinite(z_hi)
+        crossing &= np.abs(tw_hi - tw_lo) > 1e-6
+
+        unresolved = ~np.isfinite(wbfl_m)
+        use = unresolved & crossing
+        if not np.any(use):
+            continue
+
+        frac = (0.0 - tw_lo) / (tw_hi - tw_lo)
+        z_cross = z_lo + frac * (z_hi - z_lo)
+        wbfl_m[use] = z_cross[use]
+
+    return wbfl_m * 3.28084
+
+
+def calculate_snow_precipitation_1h(data):
+    """Calculate 1-hour precipitation where snow level (WBFL) is less than 600m above terrain.
+    
+    Returns 1-hour total precipitation (mm) masked to grid points where
+    WBFL is lower than 600m above the terrain elevation.
+    """
+    # Get WBFL in meters (convert from feet)
+    wbfl_ft = calculate_wet_bulb_freezing_level_height_ft(data)
+    wbfl_m = wbfl_ft / 3.28084
+    
+    # Get terrain height in meters (convert from geopotential)
+    hgt_surface = get_time_index(data['Geopotential_height_surface'])
+    terrain_m = hgt_surface.values
+    
+    # Get 1-hour total precipitation (convert from rate in mm/s to mm/hr)
+    try:
+        precip_rate = get_time_index(data['Precipitation_rate_surface']).values
+        precip_1h = precip_rate * 3600  # Convert mm/s to mm/hr
+    except (KeyError, AttributeError):
+        print('Warning: 1-hour precipitation field not available; snow precipitation layer skipped.')
+        return None
+    
+    # Mask precipitation to only where WBFL < 600m above terrain (snow will precipitate)
+    snow_precip = np.where((wbfl_m < (terrain_m + 600)) & np.isfinite(precip_1h), precip_1h, np.nan)
+    
+    return snow_precip
+
+
+def calculate_icing_relative_humidity(data):
+    """Return mean RH (%) between the 0C and -15C isotherm layer."""
+    temp_isobaric_c = get_time_index(data['Temperature_isobaric']).values - 273.15
+    rh_isobaric = get_time_index(data['Relative_humidity_isobaric']).values
+
+    in_icing_layer = (
+        (temp_isobaric_c <= 0.0)
+        & (temp_isobaric_c >= -15.0)
+        & np.isfinite(rh_isobaric)
+    )
+
+    rh_sum = np.sum(np.where(in_icing_layer, rh_isobaric, 0.0), axis=0)
+    rh_count = np.sum(in_icing_layer, axis=0)
+
+    mean_rh = np.full(rh_sum.shape, np.nan, dtype=float)
+    valid = rh_count > 0
+    mean_rh[valid] = rh_sum[valid] / rh_count[valid]
+    return mean_rh
 
 
 def get_max_geometric_vertical_velocity(data, pressure_levels_pa):
@@ -255,7 +438,7 @@ def get_latest_gfs_dataset():
     return latest_dataset, init_time
 
 
-def get_gfs_data(forecast_hour=9, latest_dataset=None, init_time=None, include_ts_fields=False, prev_acpcp_values=None):
+def get_gfs_data(forecast_hour=9, latest_dataset=None, init_time=None, include_ts_fields=False, prev_acpcp_values=None, include_airmass_fields=False):
     if latest_dataset is None or init_time is None:
         latest_dataset, init_time = get_latest_gfs_dataset()
 
@@ -304,6 +487,13 @@ def get_gfs_data(forecast_hour=9, latest_dataset=None, init_time=None, include_t
             'lev_400_mb': 'on',
             'lev_300_mb': 'on',
             'lev_250_mb': 'on',
+        })
+
+    if include_airmass_fields:
+        params.update({
+            'var_HPBL': 'on',
+            'var_ACPCP': 'on',
+            'lev_700_mb': 'on',
         })
 
     response = requests.get(
@@ -404,6 +594,22 @@ def get_gfs_data(forecast_hour=9, latest_dataset=None, init_time=None, include_t
 
         if 'wz' in ds_isobaric.data_vars:
             dataset_vars['Geometric_vertical_velocity_isobaric'] = ds_isobaric['wz']
+
+        if include_airmass_fields:
+            # NCEP HPBL decodes as 'unknown' in cfgrib (no standard name mapping).
+            # Scan all sub-datasets from the same GRIB2 file to find it.
+            all_surface_ds = cfgrib.open_datasets(
+                temp_grib_path,
+                backend_kwargs={
+                    'filter_by_keys': {'typeOfLevel': 'surface', 'stepType': 'instant'},
+                    'indexpath': '',
+                },
+            )
+            for _ds in all_surface_ds:
+                if 'unknown' in _ds.data_vars:
+                    _ds = _ds.load()
+                    dataset_vars['Planetary_boundary_layer_height_surface'] = _ds['unknown']
+                    break
 
         if include_ts_fields:
             if forecast_hour == 0:
@@ -699,6 +905,9 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
     ts_flash_profile = layer_profile == 'ts_flash'
     ts_severe_profile = layer_profile == 'ts_severe'
     bg_profile = layer_profile == 'bg'
+    airmass_fzl_profile = layer_profile == 'airmass_fzl'
+    airmass_snow_profile = layer_profile == 'airmass_snow'
+    airmass_profile = airmass_fzl_profile or airmass_snow_profile
 
     # Keep TS profile layering unchanged while restoring the requested BG stack.
     if bg_profile:
@@ -765,91 +974,93 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
     # Set extent
     ax.set_extent([lon_min, lon_max, lat_min, lat_max], crs=ccrs.PlateCarree())
     
-    # Plot topography shading
-    print("Plotting topography...")
-    elevation, elev_lons, elev_lats = get_elevation_data(data)
-    lon_grid, lat_grid = np.meshgrid(elev_lons, elev_lats)
+    # Plot topography shading beneath all weather layers.
+    if bg_profile or ts_flash_profile or ts_severe_profile or airmass_profile:
+        print("Plotting topography...")
+        elevation, elev_lons, elev_lats = get_elevation_data(data)
+        lon_grid, lat_grid = np.meshgrid(elev_lons, elev_lats)
+
+        # Elevation levels and colors from XML
+        elev_levels = [-1000, -15, 0, 50, 75, 150, 250, 350, 500, 1000, 1500, 2000, 2200]
+        elev_colors = [
+            (234/255.0, 244/255.0, 255/255.0),  # -1000 - ocean blue (#eaf4ff)
+            (234/255.0, 244/255.0, 255/255.0),  # -15 - ocean blue (#eaf4ff)
+            (230/255.0, 230/255.0, 190/255.0),  # 0 - intermediate tan (#e6e6be)
+            (230/255.0, 230/255.0, 190/255.0),  # 50 - intermediate tan (#e6e6be)
+            (230/255.0, 230/255.0, 190/255.0),  # 75 - intermediate tan (#e6e6be)
+            (210/255.0, 210/255.0, 157/255.0),  # 150 - tan (#d2d29d)
+            (170/255.0, 170/255.0, 127/255.0),  # 250 - darker tan
+            (255/255.0, 255/255.0, 0/255.0),    # 350 - yellow
+            (255/255.0, 102/255.0, 0/255.0),    # 500 - orange
+            (153/255.0, 51/255.0, 0/255.0),     # 1000 - dark brown
+            (0/255.0, 204/255.0, 255/255.0),    # 1500 - cyan
+            (192/255.0, 192/255.0, 192/255.0),  # 2000 - gray
+            (255/255.0, 255/255.0, 255/255.0)   # 2200+ - white
+        ]
+
+        elev_cmap = ListedColormap(elev_colors)
+        elev_norm = BoundaryNorm(elev_levels, elev_cmap.N, clip=True)
+
+        # Create mask for ocean areas using Natural Earth land feature
+        print("Creating ocean mask from Natural Earth land data...")
+
+        # Load Natural Earth 10m land shapefile to identify land areas
+        land_shp = natural_earth(resolution='10m', category='physical', name='land')
+        land_reader = Reader(land_shp)
+        land_geoms = list(land_reader.geometries())
+
+        # Merge all land geometries and create prepared geometry for fast contains tests
+        land_union = unary_union(land_geoms)
+        land_prep = prep(land_union)
+
+        # Create boolean mask for ocean points (inverse of land)
+        ocean_mask = np.zeros_like(elevation, dtype=bool)
+
+        # Check each grid point - use prepared geometry for 10x speedup
+        for i in range(elevation.shape[0]):  # Iterate over first dimension
+            for j in range(elevation.shape[1]):  # Iterate over second dimension
+                lon = lon_grid[i, j]
+                lat = lat_grid[i, j]
+                point = Point(lon, lat)
+
+                # If point is NOT within land geometry, it's ocean
+                if not land_prep.contains(point):
+                    ocean_mask[i, j] = True
+
+        print(f"Identified {np.sum(ocean_mask)} ocean grid points out of {elevation.size} total")
+
+        # Create a modified elevation array where ocean areas are set to -1000
+        elev_masked = elevation.copy()
+        elev_masked[ocean_mask] = -1000
+
+        cs_topo = ax.contourf(
+            lon_grid,
+            lat_grid,
+            elev_masked,
+            levels=elev_levels,
+            cmap=elev_cmap,
+            norm=elev_norm,
+            alpha=0.3,
+            extend='both',
+            transform=ccrs.PlateCarree(),
+            zorder=0)
     
-    # Elevation levels and colors from XML
-    elev_levels = [-1000, -15, 0, 50, 75, 150, 250, 350, 500, 1000, 1500, 2000, 2200]
-    elev_colors = [
-        (234/255.0, 244/255.0, 255/255.0),  # -1000 - ocean blue (#eaf4ff)
-        (234/255.0, 244/255.0, 255/255.0),  # -15 - ocean blue (#eaf4ff)
-        (230/255.0, 230/255.0, 190/255.0),  # 0 - intermediate tan (#e6e6be)
-        (230/255.0, 230/255.0, 190/255.0),  # 50 - intermediate tan (#e6e6be)
-        (230/255.0, 230/255.0, 190/255.0),  # 75 - intermediate tan (#e6e6be)
-        (210/255.0, 210/255.0, 157/255.0),  # 150 - tan (#d2d29d)
-        (170/255.0, 170/255.0, 127/255.0),  # 250 - darker tan
-        (255/255.0, 255/255.0, 0/255.0),    # 350 - yellow
-        (255/255.0, 102/255.0, 0/255.0),    # 500 - orange
-        (153/255.0, 51/255.0, 0/255.0),     # 1000 - dark brown
-        (0/255.0, 204/255.0, 255/255.0),    # 1500 - cyan
-        (192/255.0, 192/255.0, 192/255.0),  # 2000 - gray
-        (255/255.0, 255/255.0, 255/255.0)   # 2200+ - white
-    ]
-    
-    elev_cmap = ListedColormap(elev_colors)
-    elev_norm = BoundaryNorm(elev_levels, elev_cmap.N, clip=True)
-    
-    # Create mask for ocean areas using Natural Earth land feature
-    print("Creating ocean mask from Natural Earth land data...")
-    
-    # Load Natural Earth 10m land shapefile to identify land areas  
-    land_shp = natural_earth(resolution='10m', category='physical', name='land')
-    land_reader = Reader(land_shp)
-    land_geoms = list(land_reader.geometries())
-    
-    # Merge all land geometries and create prepared geometry for fast contains tests
-    land_union = unary_union(land_geoms)
-    land_prep = prep(land_union)
-    
-    # Create boolean mask for ocean points (inverse of land)
-    ocean_mask = np.zeros_like(elevation, dtype=bool)
-    
-    # Check each grid point - use prepared geometry for 10x speedup
-    for i in range(elevation.shape[0]):  # Iterate over first dimension
-        for j in range(elevation.shape[1]):  # Iterate over second dimension
-            lon = lon_grid[i, j]
-            lat = lat_grid[i, j]
-            point = Point(lon, lat)
-            
-            # If point is NOT within land geometry, it's ocean
-            if not land_prep.contains(point):
-                ocean_mask[i, j] = True
-    
-    print(f"Identified {np.sum(ocean_mask)} ocean grid points out of {elevation.size} total")
-    
-    # Create a modified elevation array where ocean areas are set to -1000
-    elev_masked = elevation.copy()
-    elev_masked[ocean_mask] = -1000
-    
-    cs_topo = ax.contourf(
-        lon_grid,
-        lat_grid,
-        elev_masked,
-        levels=elev_levels,
-        cmap=elev_cmap,
-        norm=elev_norm,
-        alpha=0.3,
-        extend='both',
-        transform=ccrs.PlateCarree(),
-        zorder=0)
-    
-    # Plot MSLP
-    mslp = get_time_index(data['MSLP_Eta_model_reduction_msl']) / 100  # Convert to hPa
-    cs_mslp = ax.contour(
-        data.longitude,
-        data.latitude,
-        mslp,
-        levels=np.arange(980, 1040, 4),
-        colors='black',
-        linewidths=1,
-        alpha=0.3,
-        zorder=z_mslp,
-    )
-    mslp_labels = ax.clabel(cs_mslp, inline=True, fontsize=8)
-    for label in mslp_labels:
-        label.set_alpha(0.3)
+    # Plot MSLP except for Airmass profiles.
+    if not airmass_profile:
+        mslp = get_time_index(data['MSLP_Eta_model_reduction_msl']) / 100  # Convert to hPa
+        cs_mslp = ax.contour(
+            data.longitude,
+            data.latitude,
+            mslp,
+            levels=np.arange(980, 1040, 4),
+            colors='black',
+            linewidths=1,
+            alpha=(0.5 if bg_profile else 0.3),
+            zorder=z_mslp,
+        )
+        mslp_labels = ax.clabel(cs_mslp, inline=True, fontsize=8)
+        for label in mslp_labels:
+            label.set_alpha(0.5 if bg_profile else 0.3)
 
     if ts_severe_profile:
         # Plot 250 hPa isotachs for severe storm potential context.
@@ -891,11 +1102,11 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         minor_only_levels = np.array([x for x in all_minor_levels if x not in major_levels_set])
 
         cs_thickness_minor = ax.contour(data.longitude, data.latitude, thickness, levels=minor_only_levels,
-                         colors='red', linewidths=1, linestyles='dashed', alpha=0.3, zorder=z_thickness)
+                 colors='red', linewidths=1, linestyles='dashed', alpha=0.5, zorder=z_thickness)
 
         # Plot major interval lines (spacing of 18, blue)
         cs_thickness_major = ax.contour(data.longitude, data.latitude, thickness, levels=major_levels,
-                         colors='blue', linewidths=1, linestyles='dashed', alpha=0.3, zorder=z_thickness)
+                 colors='blue', linewidths=1, linestyles='dashed', alpha=0.5, zorder=z_thickness)
         ax.clabel(cs_thickness_major, inline=True, fontsize=8, fmt='%d')
 
         # Plot low cloud layer (maxRH at 1000, 975, 950 hPa)
@@ -952,6 +1163,295 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             extend='max',
             transform=ccrs.PlateCarree(),
             zorder=z_drizzle)
+
+    if airmass_fzl_profile:
+        freezing_level_ft = calculate_freezing_level_height_ft(data)
+        freezing_level_ft = np.where(freezing_level_ft >= 0, freezing_level_ft, np.nan)
+
+        fzl_levels = [0, 2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000, 18000]
+        fzl_colors = [
+            '#2c1a8a',
+            '#1f5bd8',
+            '#00a6ff',
+            '#3ccf9b',
+            '#9fd356',
+            '#e7d84b',
+            '#f4b247',
+            '#ef7e3b',
+            '#d6452f',
+        ]
+        fzl_cmap = ListedColormap(fzl_colors)
+        fzl_norm = BoundaryNorm(fzl_levels, fzl_cmap.N, clip=False)
+
+        # Keep the freezing-level fill beneath all FZL model overlays.
+        ax.contourf(
+            data.longitude,
+            data.latitude,
+            freezing_level_ft,
+            levels=fzl_levels,
+            cmap=fzl_cmap,
+            norm=fzl_norm,
+            alpha=0.1,
+            extend='max',
+            transform=ccrs.PlateCarree(),
+            zorder=4.8,
+        )
+
+        # Diagonal cross-hatching where a freezing layer exists
+        # (multiple 0C crossings in the vertical column).
+        freezing_layer_mask = calculate_freezing_layer_mask(data).astype(float)
+        hatch_overlay = ax.contourf(
+            data.longitude,
+            data.latitude,
+            freezing_layer_mask,
+            levels=[0.5, 1.5],
+            colors=[(0.0, 0.0, 0.0, 0.0)],
+            hatches=['xx'],
+            transform=ccrs.PlateCarree(),
+            zorder=55,
+        )
+        hatch_overlay.set_facecolors([(0.0, 0.0, 0.0, 0.0)])
+        hatch_overlay.set_edgecolors([(0.0, 0.0, 0.0, 0.5)])
+
+        cs_fzl = ax.contour(
+            data.longitude,
+            data.latitude,
+            freezing_level_ft,
+            levels=fzl_levels[1:-1],
+            cmap=fzl_cmap,
+            linewidths=1.0,
+            alpha=0.5,
+            transform=ccrs.PlateCarree(),
+            zorder=50,
+        )
+        fzl_labels = ax.clabel(cs_fzl, inline=True, fontsize=7, fmt='%d ft')
+        for label in fzl_labels:
+            label.set_zorder(50.1)
+
+        # Icing layer: mean RH between 0C and -15C, shown only above 90%.
+        icing_rh = calculate_icing_relative_humidity(data)
+        icing_masked = np.where(icing_rh >= 90.0, icing_rh, np.nan)
+        icing_levels = [90, 92, 94, 96, 98, 100]
+        icing_colors = [
+            '#dff4ff',
+            '#bfe8ff',
+            '#8fd8ff',
+            '#58c1f5',
+            '#249ddc',
+        ]
+        icing_cmap = ListedColormap(icing_colors)
+        icing_norm = BoundaryNorm(icing_levels, icing_cmap.N, clip=True)
+
+        ax.contourf(
+            data.longitude,
+            data.latitude,
+            icing_masked,
+            levels=icing_levels,
+            cmap=icing_cmap,
+            norm=icing_norm,
+            alpha=0.78,
+            extend='max',
+            transform=ccrs.PlateCarree(),
+            zorder=5.8,
+        )
+
+        # Dashed bin outlines between icing increments.
+        ax.contour(
+            data.longitude,
+            data.latitude,
+            icing_masked,
+            levels=icing_levels[1:-1],
+            colors=[(0.08, 0.08, 0.08, 1.0)],
+            linewidths=0.35,
+            linestyles='dashed',
+            transform=ccrs.PlateCarree(),
+            zorder=5.85,
+        )
+
+        # Dashed outer boundary of the entire icing patch.
+        icing_patch_mask = np.isfinite(icing_masked).astype(float)
+        ax.contour(
+            data.longitude,
+            data.latitude,
+            icing_patch_mask,
+            levels=[0.5],
+            colors=[(0.08, 0.08, 0.08, 1.0)],
+            linewidths=0.35,
+            linestyles='dashed',
+            transform=ccrs.PlateCarree(),
+            zorder=5.9,
+        )
+
+        # Thermals layer: PBL height (ft) masked where 2m temp <= 30°C
+        if 'Planetary_boundary_layer_height_surface' in data:
+            temp_2m_raw = get_time_index(data['Temperature_height_above_ground'].sel(height_above_ground3=2)) - 273.15
+            pblh_ft = get_time_index(data['Planetary_boundary_layer_height_surface']) * 3.28084
+            thermals_ft = np.where(temp_2m_raw.values > 30.0, pblh_ft.values, np.nan)
+
+            thermal_levels = [0, 2000, 4000, 6000, 8000, 10000, 12000]
+            thermal_colors = [
+                '#ffffcc',
+                '#ffeda0',
+                '#fed976',
+                '#feb24c',
+                '#fd8d3c',
+                '#e31a1c',
+            ]
+            thermal_cmap = ListedColormap(thermal_colors)
+            thermal_norm = BoundaryNorm(thermal_levels, thermal_cmap.N, clip=False)
+
+            ax.contourf(
+                data.longitude,
+                data.latitude,
+                thermals_ft,
+                levels=thermal_levels,
+                cmap=thermal_cmap,
+                norm=thermal_norm,
+                alpha=0.75,
+                extend='max',
+                transform=ccrs.PlateCarree(),
+                zorder=6,
+            )
+        else:
+            print('Warning: HPBL field not available in dataset; thermals layer skipped.')
+
+        # Cold pool hail layer: 1hr convective precip where 700hPa temp < -9°C
+        if 'Convective_precipitation_1h_surface' in data:
+            t700_c = get_isobaric_field(data['Temperature_isobaric'], 70000).values - 273.15
+            cprecip = data['Convective_precipitation_1h_surface'].values
+            hail_masked = np.where((t700_c < -9.0) & (cprecip >= 0.1), cprecip, np.nan)
+
+            hail_levels = [0, 0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 20.0, 40.0]
+            hail_colors = [
+                '#e0f7fa',
+                '#b2ebf2',
+                '#80deea',
+                '#4dd0e1',
+                '#00bcd4',
+                '#0097a7',
+                '#006064',
+                '#00363a',
+            ]
+            hail_cmap = ListedColormap(hail_colors)
+            hail_norm = BoundaryNorm(hail_levels, hail_cmap.N, clip=False)
+
+            ax.contourf(
+                data.longitude,
+                data.latitude,
+                hail_masked,
+                levels=hail_levels,
+                cmap=hail_cmap,
+                norm=hail_norm,
+                alpha=0.85,
+                extend='max',
+                transform=ccrs.PlateCarree(),
+                zorder=7,
+            )
+
+            # Dashed bin outlines between hail increments.
+            ax.contour(
+                data.longitude,
+                data.latitude,
+                hail_masked,
+                levels=hail_levels[1:-1],
+                colors=[(0.08, 0.08, 0.08, 1.0)],
+                linewidths=0.35,
+                linestyles='dashed',
+                transform=ccrs.PlateCarree(),
+                zorder=7.1,
+            )
+
+            # Dashed outer boundary of the entire hail patch.
+            hail_patch_mask = np.isfinite(hail_masked).astype(float)
+            ax.contour(
+                data.longitude,
+                data.latitude,
+                hail_patch_mask,
+                levels=[0.5],
+                colors=[(0.08, 0.08, 0.08, 1.0)],
+                linewidths=0.35,
+                linestyles='dashed',
+                transform=ccrs.PlateCarree(),
+                zorder=7.15,
+            )
+        else:
+            print('Warning: Convective precipitation field not available; cold pool hail layer skipped.')
+
+    if airmass_snow_profile:
+        wbfl_ft = calculate_wet_bulb_freezing_level_height_ft(data)
+        wbfl_ft = np.where(wbfl_ft >= 0, wbfl_ft, np.nan)
+
+        wbfl_levels = [0, 1000, 2000, 3000, 4000, 5000, 6000, 8000, 10000, 12000, 14000, 16000]
+        wbfl_colors = [
+            '#003f5c',
+            '#2f4b7c',
+            '#365c8d',
+            '#3f6f9e',
+            '#4b82ad',
+            '#5a95b9',
+            '#6da8c2',
+            '#84bbca',
+            '#9dced1',
+            '#b9e0d7',
+            '#d7f1de',
+        ]
+
+        wbfl_line_cmap = ListedColormap(wbfl_colors)
+        cs_wbfl = ax.contour(
+            data.longitude,
+            data.latitude,
+            wbfl_ft,
+            levels=wbfl_levels,
+            cmap=wbfl_line_cmap,
+            linewidths=1.2,
+            alpha=0.95,
+            transform=ccrs.PlateCarree(),
+            zorder=6.6,
+        )
+        ax.clabel(cs_wbfl, inline=True, fontsize=7, fmt='%d ft')
+        
+        # Plot 1-hour snow precipitation where WBFL < terrain height
+        snow_precip = calculate_snow_precipitation_1h(data)
+        if snow_precip is not None:
+            # High-visibility glacial palette: bright blue at low values to white at high values
+            snow_colors = [
+                '#00b7ff',  # bright glacial blue
+                '#2cc7ff',
+                '#54d6ff',
+                '#7ee3ff',
+                '#a8eeff',
+                '#cdf6ff',
+                '#e9fcff',
+                '#ffffff',  # bright white
+            ]
+            snow_cmap = ListedColormap(snow_colors)
+            
+            # Precipitation levels in mm (0.1, 0.2, 0.5, 1, 2, 4, 8 mm/hr)
+            snow_precip_levels = [0.1, 0.2, 0.5, 1.0, 2.0, 4.0, 8.0]
+            
+            cf_snow = ax.contourf(
+                data.longitude,
+                data.latitude,
+                snow_precip,
+                levels=snow_precip_levels + [100],  # Add upper limit for contourf
+                cmap=snow_cmap,
+                alpha=0.82,
+                transform=ccrs.PlateCarree(),
+                zorder=6.8,
+            )
+            
+            # Add contour lines for visibility
+            cs_snow = ax.contour(
+                data.longitude,
+                data.latitude,
+                snow_precip,
+                levels=snow_precip_levels,
+                colors='white',
+                linewidths=0.5,
+                alpha=0.6,
+                transform=ccrs.PlateCarree(),
+                zorder=6.85,
+            )
     
     # Calculate 10 m surface wind once for both fog logic and wind barbs
     u_wind = get_time_index(data['u-component_of_wind_height_above_ground'].sel(height_above_ground2=10))
@@ -1084,6 +1584,41 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             alpha=1.0,
             transform=ccrs.PlateCarree(),
             zorder=z_fog)
+
+    if airmass_profile:
+        # Plot freezing fog using BG fog thresholds but only where surface temp < 0C.
+        temp_2m = get_time_index(data['Temperature_height_above_ground'].sel(height_above_ground3=2)) - 273.15
+        dewpoint_2m = get_time_index(data['Dewpoint_temperature_height_above_ground'].sel(height_above_ground4=2)) - 273.15
+        wind_speed_kt = np.sqrt(u_wind.values**2 + v_wind.values**2) * 1.94384  # m/s to kt
+        temp_dew_spread = temp_2m.values - dewpoint_2m.values
+
+        fog = np.zeros_like(temp_dew_spread, dtype=int)
+        fog[(wind_speed_kt < 5) & (temp_dew_spread < 1.0)] = 1
+        fog[(wind_speed_kt < 3) & (temp_dew_spread < 0.5)] = 2
+        fog[(wind_speed_kt < 1) & (temp_dew_spread < 0.1)] = 3
+        freezing_fog = np.where(temp_2m.values < 0.0, fog, 0)
+
+        print(
+            f"Freezing fog grid points - F1: {np.sum(freezing_fog == 1)}, "
+            f"F2: {np.sum(freezing_fog == 2)}, F3: {np.sum(freezing_fog == 3)}"
+        )
+
+        freezing_fog_masked = np.ma.masked_where(freezing_fog == 0, freezing_fog)
+        fog_cmap = ListedColormap(['#ff0000', '#ffaa7f', '#ffff00'])
+        fog_levels = [0.5, 1.5, 2.5, 3.5]
+        fog_norm = BoundaryNorm(fog_levels, fog_cmap.N, clip=True)
+
+        ax.contourf(
+            data.longitude,
+            data.latitude,
+            freezing_fog_masked,
+            levels=fog_levels,
+            cmap=fog_cmap,
+            norm=fog_norm,
+            alpha=1.0,
+            transform=ccrs.PlateCarree(),
+            zorder=7.2,
+        )
     
     # Plot 1hr precipitation / TS flash density field
     if ts_flash_profile:
@@ -1167,6 +1702,12 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         precip_colors = None
         precip_alpha = None
         precip_zorder = None
+    elif airmass_profile:
+        precip_masked = None
+        precip_levels = None
+        precip_colors = None
+        precip_alpha = None
+        precip_zorder = None
     else:
         precip = get_time_index(data['Precipitation_rate_surface']) * 3600  # Convert to mm/hr
         precip_masked = precip.where(precip >= 0.1, np.nan)
@@ -1193,7 +1734,7 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         precip_alpha = 1.0
         precip_zorder = z_bg_precip
 
-    if not ts_severe_profile:
+    if not ts_severe_profile and not airmass_profile:
         precip_colors_norm = [(r / 255.0, g / 255.0, b / 255.0, a / 255.0) for r, g, b, a in precip_colors]
         precip_cmap = ListedColormap(precip_colors_norm)
         precip_norm = BoundaryNorm(precip_levels, precip_cmap.N, clip=True)
@@ -1240,25 +1781,26 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         )
     
     # Plot SFC winds unless explicitly disabled for severe-potential profile.
-    if not ts_severe_profile:
+    if not ts_severe_profile and not airmass_profile:
         ax.barbs(data.longitude[::10], data.latitude[::10], u_wind.values[::10, ::10], v_wind.values[::10, ::10], 
-                 length=5, linewidth=0.5, color='#800000', alpha=0.3, zorder=(z_bg_barbs if bg_profile else 6))
+                 length=5, linewidth=0.5, color='#800000', alpha=(0.5 if bg_profile else 0.3), zorder=(z_bg_barbs if bg_profile else 6))
     else:
-        # Plot surface-to-500 hPa shear vectors as barbs in kt.
-        shear_u_kt = shear_u_ms * 1.94384
-        shear_v_kt = shear_v_ms * 1.94384
+        if ts_severe_profile:
+            # Plot surface-to-500 hPa shear vectors as barbs in kt.
+            shear_u_kt = shear_u_ms * 1.94384
+            shear_v_kt = shear_v_ms * 1.94384
 
-        ax.barbs(
-            data.longitude[::10],
-            data.latitude[::10],
-            shear_u_kt[::10, ::10],
-            shear_v_kt[::10, ::10],
-            length=5,
-            linewidth=0.5,
-            color='#2b0000',
-            alpha=0.5,
-            zorder=6.2,
-        )
+            ax.barbs(
+                data.longitude[::10],
+                data.latitude[::10],
+                shear_u_kt[::10, ::10],
+                shear_v_kt[::10, ::10],
+                length=5,
+                linewidth=0.5,
+                color='#2b0000',
+                alpha=0.5,
+                zorder=6.2,
+            )
     
     # Plot TAF locations with filtering based on text bounding boxes
     if taf_lons:  # Only plot if TAF data was loaded successfully
@@ -1438,6 +1980,80 @@ def generate_gfs_ts_severe_frames(forecast_hours):
         publish_generated_frames(output_dir, generated_files, temp_dir)
 
 
+def generate_gfs_airmass_fzl_frames(forecast_hours):
+    output_dir = 'images/Airmass/FZL'
+    os.makedirs(output_dir, exist_ok=True)
+    latest_dataset, init_time = get_latest_gfs_dataset()
+
+    with tempfile.TemporaryDirectory(prefix='avmaps_airmass_fzl_') as temp_dir:
+        print(f'Generating {len(forecast_hours)} Airmass/FZL frames in temporary workspace: {temp_dir}')
+        generated_files = []
+        prev_acpcp_values = None
+        last_generated_hour = None
+
+        for forecast_hour in forecast_hours:
+            print(f'\nGenerating Airmass/FZL frame +{forecast_hour}hrs...')
+
+            use_prev = prev_acpcp_values is not None and last_generated_hour == forecast_hour - 1
+            data, init_time, prev_acpcp_values = get_gfs_data(
+                forecast_hour,
+                latest_dataset,
+                init_time,
+                include_ts_fields=True,
+                include_airmass_fields=True,
+                prev_acpcp_values=(prev_acpcp_values if use_prev else None),
+            )
+            last_generated_hour = forecast_hour
+            print('Using raw hourly GFS convective precipitation and airmass fields')
+
+            fig = plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='airmass_fzl')
+
+            filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.png'
+            temp_filepath = os.path.join(temp_dir, filename)
+            fig.savefig(temp_filepath, dpi=150, bbox_inches='tight')
+            plt.close(fig)
+            generated_files.append(filename)
+
+            print(f'Airmass/FZL map staged at {temp_filepath}')
+
+        print(f'\nFinished building {len(generated_files)} Airmass/FZL frames. Publishing to {output_dir}...')
+        publish_generated_frames(output_dir, generated_files, temp_dir)
+
+
+def generate_gfs_airmass_snow_frames(forecast_hours):
+    output_dir = 'images/Airmass/Snow level'
+    os.makedirs(output_dir, exist_ok=True)
+    latest_dataset, init_time = get_latest_gfs_dataset()
+
+    with tempfile.TemporaryDirectory(prefix='avmaps_airmass_snow_') as temp_dir:
+        print(f'Generating {len(forecast_hours)} Airmass/Snow level frames in temporary workspace: {temp_dir}')
+        generated_files = []
+
+        for forecast_hour in forecast_hours:
+            print(f'\nGenerating Airmass/Snow level frame +{forecast_hour}hrs...')
+            data, init_time, _ = get_gfs_data(
+                forecast_hour,
+                latest_dataset,
+                init_time,
+                include_ts_fields=True,
+                include_airmass_fields=True,
+            )
+            print('Using raw hourly GFS precipitation and airmass fields')
+
+            fig = plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='airmass_snow')
+
+            filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.png'
+            temp_filepath = os.path.join(temp_dir, filename)
+            fig.savefig(temp_filepath, dpi=150, bbox_inches='tight')
+            plt.close(fig)
+            generated_files.append(filename)
+
+            print(f'Airmass/Snow level map staged at {temp_filepath}')
+
+        print(f'\nFinished building {len(generated_files)} Airmass/Snow level frames. Publishing to {output_dir}...')
+        publish_generated_frames(output_dir, generated_files, temp_dir)
+
+
 def generate_icon_bg_frames(forecast_hours, preferred_run_time=None):
     output_dir = 'images/BG/ICON'
     os.makedirs(output_dir, exist_ok=True)
@@ -1484,7 +2100,7 @@ def generate_icon_bg_frames(forecast_hours, preferred_run_time=None):
 def main():
     parser = argparse.ArgumentParser(description='Generate BG forecast frames from GFS and/or ICON data.')
     parser.add_argument('--model', choices=['gfs', 'icon', 'both'], default='both')
-    parser.add_argument('--layer', choices=['bg', 'ts_flash', 'ts_severe'], default='bg')
+    parser.add_argument('--layer', choices=['bg', 'ts_flash', 'ts_severe', 'airmass_fzl', 'airmass_snow'], default='bg')
     parser.add_argument('--start-hour', type=int, default=9)
     parser.add_argument('--end-hour', type=int, default=35)
     args = parser.parse_args()
@@ -1501,6 +2117,18 @@ def main():
         if args.model != 'gfs':
             raise ValueError('The ts_severe layer is currently supported for GFS only')
         generate_gfs_ts_severe_frames(forecast_hours)
+        return
+
+    if args.layer == 'airmass_fzl':
+        if args.model != 'gfs':
+            raise ValueError('The airmass_fzl layer is currently supported for GFS only')
+        generate_gfs_airmass_fzl_frames(forecast_hours)
+        return
+
+    if args.layer == 'airmass_snow':
+        if args.model != 'gfs':
+            raise ValueError('The airmass_snow layer is currently supported for GFS only')
+        generate_gfs_airmass_snow_frames(forecast_hours)
         return
 
     gfs_run_time = None
