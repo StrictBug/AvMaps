@@ -303,6 +303,157 @@ def get_max_geometric_vertical_velocity(data, pressure_levels_pa):
     return np.max(np.stack(level_values, axis=0), axis=0)
 
 
+def calculate_max_wind_below_850hpa_kt(data):
+    """Return the maximum wind speed (kt) from the surface up to and including 850 hPa."""
+    u_isobaric = get_time_index(data['u-component_of_wind_isobaric'])
+    v_isobaric = get_time_index(data['v-component_of_wind_isobaric'])
+
+    pressures = u_isobaric['isobaric'].values
+    below_850_mask = pressures >= 85000
+
+    speed_layers = []
+    if np.any(below_850_mask):
+        isobaric_speed = np.sqrt(
+            u_isobaric.values[below_850_mask, :, :] ** 2
+            + v_isobaric.values[below_850_mask, :, :] ** 2
+        )
+        speed_layers.append(isobaric_speed)
+
+    u_10m = get_time_index(data['u-component_of_wind_height_above_ground'].sel(height_above_ground2=10))
+    v_10m = get_time_index(data['v-component_of_wind_height_above_ground'].sel(height_above_ground2=10))
+    surface_speed = np.sqrt(u_10m.values ** 2 + v_10m.values ** 2)[np.newaxis, :, :]
+    speed_layers.append(surface_speed)
+
+    max_speed_ms = np.nanmax(np.concatenate(speed_layers, axis=0), axis=0)
+    return max_speed_ms * 1.94384
+
+
+def calculate_shear_turbulence_category(data):
+    """Return categorical shear turbulence class from the surface to available levels up to 800 hPa.
+
+    Classes: 0 none, 1 moderate, 2 moderate/severe, 3 severe.
+    """
+    u_surface = get_time_index(data['u-component_of_wind_height_above_ground'].sel(height_above_ground2=10)).values
+    v_surface = get_time_index(data['v-component_of_wind_height_above_ground'].sel(height_above_ground2=10)).values
+
+    u_isobaric = get_time_index(data['u-component_of_wind_isobaric'])
+    v_isobaric = get_time_index(data['v-component_of_wind_isobaric'])
+
+    pressures = u_isobaric['isobaric'].values
+    up_to_800_mask = pressures >= 80000
+
+    if not np.any(up_to_800_mask):
+        return np.zeros_like(u_surface, dtype=np.int8)
+
+    u_upper = u_isobaric.values[up_to_800_mask, :, :]
+    v_upper = v_isobaric.values[up_to_800_mask, :, :]
+
+    upper_speed_kt = np.sqrt(u_upper ** 2 + v_upper ** 2) * 1.94384
+    shear_mag_kt = np.sqrt(
+        (u_upper - u_surface[np.newaxis, :, :]) ** 2
+        + (v_upper - v_surface[np.newaxis, :, :]) ** 2
+    ) * 1.94384
+
+    category = np.zeros_like(shear_mag_kt, dtype=np.int8)
+
+    strong_upper = upper_speed_kt > 45.0
+    very_strong_upper = upper_speed_kt > 65.0
+
+    category = np.where(strong_upper & (shear_mag_kt >= 15.0) & (shear_mag_kt < 30.0), 1, category)
+    category = np.where(strong_upper & (shear_mag_kt >= 30.0) & (shear_mag_kt < 40.0), 2, category)
+    category = np.where(strong_upper & (shear_mag_kt >= 40.0), 3, category)
+
+    category = np.where(very_strong_upper & (shear_mag_kt >= 9.0) & (shear_mag_kt < 20.0), 1, category)
+    category = np.where(very_strong_upper & (shear_mag_kt >= 20.0) & (shear_mag_kt < 25.0), 2, category)
+    category = np.where(very_strong_upper & (shear_mag_kt >= 25.0), 3, category)
+
+    max_category = np.max(category, axis=0)
+    print(
+        f"Shear turbulence grid points - MOD: {np.sum(max_category == 1)}, "
+        f"MOD/SEV: {np.sum(max_category == 2)}, SEV: {np.sum(max_category == 3)}"
+    )
+    return max_category
+
+
+def calculate_lee_turbulence_category(data):
+    """Return categorical lee turbulence class for downhill flow within 3000 ft AGL up to 800 hPa.
+
+    Classes: 0 none, 1 moderate, 2 moderate/severe, 3 severe.
+    """
+    terrain_m = get_time_index(data['Geopotential_height_surface']).values
+    hgt_isobaric = get_time_index(data['Geopotential_height_isobaric'])
+    u_isobaric = get_time_index(data['u-component_of_wind_isobaric'])
+    v_isobaric = get_time_index(data['v-component_of_wind_isobaric'])
+
+    pressures = u_isobaric['isobaric'].values
+    up_to_800_mask = pressures >= 80000
+
+    if not np.any(up_to_800_mask):
+        return np.zeros_like(terrain_m, dtype=np.int8)
+
+    lats = data.latitude.values
+    lons = data.longitude.values
+
+    dterrain_dlat = np.gradient(terrain_m, lats, axis=0)
+    dterrain_dlon = np.gradient(terrain_m, lons, axis=1)
+
+    meters_per_deg_lat = 111320.0
+    meters_per_deg_lon = np.maximum(np.cos(np.deg2rad(lats)), 1e-6)[:, np.newaxis] * 111320.0
+
+    terrain_grad_y = dterrain_dlat / meters_per_deg_lat
+    terrain_grad_x = dterrain_dlon / meters_per_deg_lon
+
+    upper_heights_m = hgt_isobaric.values[up_to_800_mask, :, :]
+    height_agl_m = upper_heights_m - terrain_m[np.newaxis, :, :]
+    within_3000ft_agl = np.isfinite(height_agl_m) & (height_agl_m >= 0.0) & (height_agl_m <= 914.4)
+
+    u_upper = u_isobaric.values[up_to_800_mask, :, :]
+    v_upper = v_isobaric.values[up_to_800_mask, :, :]
+    upper_speed_ms = np.sqrt(u_upper ** 2 + v_upper ** 2)
+    upper_speed_kt = upper_speed_ms * 1.94384
+
+    wind_unit_x = np.divide(u_upper, upper_speed_ms, out=np.zeros_like(u_upper), where=upper_speed_ms > 1e-6)
+    wind_unit_y = np.divide(v_upper, upper_speed_ms, out=np.zeros_like(v_upper), where=upper_speed_ms > 1e-6)
+
+    directional_derivative = (
+        terrain_grad_x[np.newaxis, :, :] * wind_unit_x
+        + terrain_grad_y[np.newaxis, :, :] * wind_unit_y
+    )
+    downhill_flow = directional_derivative < -1e-4
+
+    lee_mask = within_3000ft_agl & downhill_flow
+    category = np.zeros_like(upper_speed_kt, dtype=np.int8)
+    category = np.where(lee_mask & (upper_speed_kt >= 30.0) & (upper_speed_kt < 40.0), 1, category)
+    category = np.where(lee_mask & (upper_speed_kt >= 40.0) & (upper_speed_kt < 45.0), 2, category)
+    category = np.where(lee_mask & (upper_speed_kt >= 45.0), 3, category)
+
+    max_category = np.max(category, axis=0)
+    print(
+        f"Lee turbulence grid points - MOD: {np.sum(max_category == 1)}, "
+        f"MOD/SEV: {np.sum(max_category == 2)}, SEV: {np.sum(max_category == 3)}"
+    )
+    return max_category
+
+
+def calculate_mountain_wave_intensity(data, min_pressure_pa=25000):
+    """Return the maximum magnitude of geometric vertical velocity (m/s) from available levels down to 250 hPa."""
+    if 'Geometric_vertical_velocity_isobaric' not in data:
+        print('Warning: Geometric vertical velocity field not available; MTW layer skipped.')
+        return None
+
+    wz_isobaric = get_time_index(data['Geometric_vertical_velocity_isobaric'])
+    pressures = wz_isobaric['isobaric'].values
+    valid_mask = pressures >= min_pressure_pa
+
+    if not np.any(valid_mask):
+        print('Warning: No isobaric vertical velocity levels available down to 250 hPa; MTW layer skipped.')
+        return None
+
+    max_abs_wz = np.nanmax(np.abs(wz_isobaric.values[valid_mask, :, :]), axis=0)
+    print(f'MTW intensity grid points >= 0.2 m/s: {np.sum(max_abs_wz >= 0.2)}')
+    return max_abs_wz
+
+
 def get_gfs_convective_precip_accumulation(forecast_hour, init_time):
     """Fetch accumulated convective precipitation (kg/m^2 ~= mm) for one forecast hour."""
     run_date = init_time.strftime('%Y%m%d')
@@ -905,12 +1056,30 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
     ts_flash_profile = layer_profile == 'ts_flash'
     ts_severe_profile = layer_profile == 'ts_severe'
     bg_profile = layer_profile == 'bg'
+    turb_mtw_profile = layer_profile == 'turb_mtw'
+    turb_wind_profile = layer_profile == 'turb_wind'
+    turb_profile = turb_mtw_profile or turb_wind_profile
+    bg_or_turb_profile = bg_profile or turb_profile
     airmass_fzl_profile = layer_profile == 'airmass_fzl'
     airmass_snow_profile = layer_profile == 'airmass_snow'
     airmass_profile = airmass_fzl_profile or airmass_snow_profile
 
-    # Keep TS profile layering unchanged while restoring the requested BG stack.
-    if bg_profile:
+    if turb_mtw_profile:
+        plot_lat_min = -47.0
+        plot_lat_max = -28.0
+        mtw_center_lon = (128.0 + 162.0) / 2.0
+        original_aspect_ratio = (lon_max - lon_min) / (lat_max - lat_min)
+        mtw_lon_span = (plot_lat_max - plot_lat_min) * original_aspect_ratio
+        plot_lon_min = mtw_center_lon - (mtw_lon_span / 2.0)
+        plot_lon_max = mtw_center_lon + (mtw_lon_span / 2.0)
+    else:
+        plot_lat_min = lat_min
+        plot_lat_max = lat_max
+        plot_lon_min = lon_min
+        plot_lon_max = lon_max
+
+    # Keep TS profile layering unchanged while restoring the requested BG/Turb stack.
+    if bg_or_turb_profile:
         z_coast = 9
         z_borders = 9
         z_gaf = 9
@@ -950,8 +1119,8 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             lon = row['Longitude']
             # Only include TAF points within the domain bounds
             # Also account for label offset so text remains inside the domain.
-            if (lat_min <= lat <= lat_max and lon_min <= lon <= lon_max and
-                lon + TAF_LABEL_DX >= lon_min and lat + TAF_LABEL_DY <= lat_max):
+            if (plot_lat_min <= lat <= plot_lat_max and plot_lon_min <= lon <= plot_lon_max and
+                lon + TAF_LABEL_DX >= plot_lon_min and lat + TAF_LABEL_DY <= plot_lat_max):
                 taf_names.append(row['TAF'])
                 taf_lats.append(lat)
                 taf_lons.append(lon)
@@ -972,10 +1141,10 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
     ax.add_feature(gaf_feature, zorder=z_gaf)
     
     # Set extent
-    ax.set_extent([lon_min, lon_max, lat_min, lat_max], crs=ccrs.PlateCarree())
+    ax.set_extent([plot_lon_min, plot_lon_max, plot_lat_min, plot_lat_max], crs=ccrs.PlateCarree())
     
     # Plot topography shading beneath all weather layers.
-    if bg_profile or ts_flash_profile or ts_severe_profile or airmass_profile:
+    if bg_or_turb_profile or ts_flash_profile or ts_severe_profile or airmass_profile:
         print("Plotting topography...")
         elevation, elev_lons, elev_lats = get_elevation_data(data)
         lon_grid, lat_grid = np.meshgrid(elev_lons, elev_lats)
@@ -1045,8 +1214,150 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             transform=ccrs.PlateCarree(),
             zorder=0)
     
+    if turb_mtw_profile:
+        mtw_intensity = calculate_mountain_wave_intensity(data)
+        if mtw_intensity is not None:
+            mtw_masked = np.where(mtw_intensity >= 0.2, mtw_intensity, np.nan)
+            mtw_levels = [0.2, 0.4, 0.6]
+            mtw_colors = ['#ff9900', '#ff0000']
+            mtw_cmap = ListedColormap(mtw_colors)
+            mtw_cmap.set_over('#ff00ff')
+            mtw_norm = BoundaryNorm(mtw_levels, mtw_cmap.N, clip=False)
+
+            ax.contourf(
+                data.longitude,
+                data.latitude,
+                mtw_masked,
+                levels=mtw_levels,
+                cmap=mtw_cmap,
+                norm=mtw_norm,
+                alpha=0.9,
+                extend='max',
+                transform=ccrs.PlateCarree(),
+                zorder=250,
+            )
+
+    if turb_wind_profile:
+        max_wind_kt = calculate_max_wind_below_850hpa_kt(data)
+        wind_masked = np.where(max_wind_kt >= 25.0, max_wind_kt, np.nan)
+        wind_levels = [25, 30, 35, 40, 45, 50, 55, 60, 70, 80]
+        wind_colors = [
+            '#00ff00',
+            '#006800',
+            '#00b4ff',
+            '#0064ff',
+            '#0000ff',
+            '#ff5555',
+            '#ff0000',
+            '#e60000',
+            '#be0000',
+        ]
+        wind_cmap = ListedColormap(wind_colors)
+        wind_cmap.set_over('#960000')
+        wind_norm = BoundaryNorm(wind_levels, wind_cmap.N, clip=False)
+
+        ax.contourf(
+            data.longitude,
+            data.latitude,
+            wind_masked,
+            levels=wind_levels,
+            cmap=wind_cmap,
+            norm=wind_norm,
+            alpha=0.5,
+            extend='max',
+            transform=ccrs.PlateCarree(),
+            zorder=5.5,
+        )
+
+        shear_turbulence = calculate_shear_turbulence_category(data)
+        shear_turbulence_masked = np.ma.masked_where(shear_turbulence == 0, shear_turbulence)
+        shear_turbulence_cmap = ListedColormap(['#ffcc00', '#ff6600', '#ff0000'])
+        shear_turbulence_levels = [0.5, 1.5, 2.5, 3.5]
+        shear_turbulence_norm = BoundaryNorm(shear_turbulence_levels, shear_turbulence_cmap.N, clip=True)
+
+        ax.contourf(
+            data.longitude,
+            data.latitude,
+            shear_turbulence_masked,
+            levels=shear_turbulence_levels,
+            cmap=shear_turbulence_cmap,
+            norm=shear_turbulence_norm,
+            alpha=0.9,
+            transform=ccrs.PlateCarree(),
+            zorder=230,
+        )
+
+        ax.contour(
+            data.longitude,
+            data.latitude,
+            shear_turbulence_masked,
+            levels=shear_turbulence_levels[1:-1],
+            colors=[(0.08, 0.08, 0.08, 1.0)],
+            linewidths=0.35,
+            linestyles='dashed',
+            transform=ccrs.PlateCarree(),
+            zorder=230.05,
+        )
+
+        shear_patch_mask = (shear_turbulence > 0).astype(float)
+        ax.contour(
+            data.longitude,
+            data.latitude,
+            shear_patch_mask,
+            levels=[0.5],
+            colors=[(0.08, 0.08, 0.08, 1.0)],
+            linewidths=0.35,
+            linestyles='dashed',
+            transform=ccrs.PlateCarree(),
+            zorder=230.1,
+        )
+
+        lee_turbulence = calculate_lee_turbulence_category(data)
+        lee_turbulence_masked = np.ma.masked_where(lee_turbulence == 0, lee_turbulence)
+        lee_turbulence_cmap = ListedColormap(['#ffcc00', '#ff6600', '#ff0000'])
+        lee_turbulence_levels = [0.5, 1.5, 2.5, 3.5]
+        lee_turbulence_norm = BoundaryNorm(lee_turbulence_levels, lee_turbulence_cmap.N, clip=True)
+
+        ax.contourf(
+            data.longitude,
+            data.latitude,
+            lee_turbulence_masked,
+            levels=lee_turbulence_levels,
+            cmap=lee_turbulence_cmap,
+            norm=lee_turbulence_norm,
+            alpha=0.9,
+            transform=ccrs.PlateCarree(),
+            zorder=231,
+        )
+
+        ax.contour(
+            data.longitude,
+            data.latitude,
+            lee_turbulence_masked,
+            levels=lee_turbulence_levels[1:-1],
+            colors=[(0.08, 0.08, 0.08, 1.0)],
+            linewidths=0.35,
+            linestyles='dashed',
+            transform=ccrs.PlateCarree(),
+            zorder=231.05,
+        )
+
+        lee_patch_mask = (lee_turbulence > 0).astype(float)
+        ax.contour(
+            data.longitude,
+            data.latitude,
+            lee_patch_mask,
+            levels=[0.5],
+            colors=[(0.08, 0.08, 0.08, 1.0)],
+            linewidths=0.35,
+            linestyles='dashed',
+            transform=ccrs.PlateCarree(),
+            zorder=231.1,
+        )
+
     # Plot MSLP except for Airmass profiles.
     if not airmass_profile:
+        mslp_alpha = 0.2 if turb_profile else (0.5 if bg_profile else 0.3)
         mslp = get_time_index(data['MSLP_Eta_model_reduction_msl']) / 100  # Convert to hPa
         cs_mslp = ax.contour(
             data.longitude,
@@ -1055,12 +1366,12 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             levels=np.arange(980, 1040, 4),
             colors='black',
             linewidths=1,
-            alpha=(0.5 if bg_profile else 0.3),
+            alpha=mslp_alpha,
             zorder=z_mslp,
         )
         mslp_labels = ax.clabel(cs_mslp, inline=True, fontsize=8)
         for label in mslp_labels:
-            label.set_alpha(0.5 if bg_profile else 0.3)
+            label.set_alpha(mslp_alpha)
 
     if ts_severe_profile:
         # Plot 250 hPa isotachs for severe storm potential context.
@@ -1708,6 +2019,12 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         precip_colors = None
         precip_alpha = None
         precip_zorder = None
+    elif turb_profile:
+        precip_masked = None
+        precip_levels = None
+        precip_colors = None
+        precip_alpha = None
+        precip_zorder = None
     else:
         precip = get_time_index(data['Precipitation_rate_surface']) * 3600  # Convert to mm/hr
         precip_masked = precip.where(precip >= 0.1, np.nan)
@@ -1734,7 +2051,7 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         precip_alpha = 1.0
         precip_zorder = z_bg_precip
 
-    if not ts_severe_profile and not airmass_profile:
+    if precip_masked is not None:
         precip_colors_norm = [(r / 255.0, g / 255.0, b / 255.0, a / 255.0) for r, g, b, a in precip_colors]
         precip_cmap = ListedColormap(precip_colors_norm)
         precip_norm = BoundaryNorm(precip_levels, precip_cmap.N, clip=True)
@@ -1780,10 +2097,11 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             zorder=precip_zorder + 0.15,
         )
     
-    # Plot SFC winds unless explicitly disabled for severe-potential profile.
+    # Plot SFC winds unless explicitly disabled for the current profile.
     if not ts_severe_profile and not airmass_profile:
+        barb_alpha = 0.2 if turb_profile else (0.5 if bg_or_turb_profile else 0.3)
         ax.barbs(data.longitude[::10], data.latitude[::10], u_wind.values[::10, ::10], v_wind.values[::10, ::10], 
-                 length=5, linewidth=0.5, color='#800000', alpha=(0.5 if bg_profile else 0.3), zorder=(z_bg_barbs if bg_profile else 6))
+                 length=5, linewidth=0.5, color='#800000', alpha=barb_alpha, zorder=(z_bg_barbs if bg_or_turb_profile else 6))
     else:
         if ts_severe_profile:
             # Plot surface-to-500 hPa shear vectors as barbs in kt.
@@ -1835,8 +2153,8 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             x_max, y_max = bbox_data.xmax, bbox_data.ymax
             
             # If any corner is outside domain, remove the text
-            if not (lon_min <= x_min and x_max <= lon_max and 
-                    lat_min <= y_min and y_max <= lat_max):
+            if not (plot_lon_min <= x_min and x_max <= plot_lon_max and 
+                    plot_lat_min <= y_min and y_max <= plot_lat_max):
                 text_obj.remove()
                 print(f"Removing {name}: bbox outside domain (lon: {x_min:.2f}-{x_max:.2f}, lat: {y_min:.2f}-{y_max:.2f})")
             else:
@@ -1857,7 +2175,7 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         levels=[0.5, 1.5],
         colors=[(0.5, 0.5, 0.5, 0.3)],
         transform=ccrs.PlateCarree(),
-        zorder=200,
+        zorder=300,
     )
     
     # Add title
@@ -2054,6 +2372,64 @@ def generate_gfs_airmass_snow_frames(forecast_hours):
         publish_generated_frames(output_dir, generated_files, temp_dir)
 
 
+def generate_gfs_turb_frames(forecast_hours, include_mtw=True, include_wind=True):
+    mtw_output_dir = 'images/Turb/MTW'
+    wind_output_dir = 'images/Turb/Wind'
+    os.makedirs(mtw_output_dir, exist_ok=True)
+    os.makedirs(wind_output_dir, exist_ok=True)
+    latest_dataset, init_time = get_latest_gfs_dataset()
+
+    with tempfile.TemporaryDirectory(prefix='avmaps_turb_mtw_') as mtw_temp_dir, tempfile.TemporaryDirectory(prefix='avmaps_turb_wind_') as wind_temp_dir:
+        targets = []
+        if include_mtw:
+            targets.append('MTW')
+        if include_wind:
+            targets.append('Wind')
+        print(
+            f"Generating {len(forecast_hours)} Turb {'/'.join(targets)} frames in temporary workspaces: "
+            f'{mtw_temp_dir} and {wind_temp_dir}'
+        )
+        mtw_generated_files = []
+        wind_generated_files = []
+
+        for forecast_hour in forecast_hours:
+            print(f'\nGenerating Turb frame +{forecast_hour}hrs...')
+
+            data, init_time, _ = get_gfs_data(
+                forecast_hour,
+                latest_dataset,
+                init_time,
+                include_ts_fields=include_mtw,
+            )
+            print('Using raw hourly GFS 0.25 model fields for Turb maps')
+
+            if include_mtw:
+                mtw_fig = plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='turb_mtw')
+                mtw_filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.png'
+                mtw_temp_filepath = os.path.join(mtw_temp_dir, mtw_filename)
+                mtw_fig.savefig(mtw_temp_filepath, dpi=150, bbox_inches='tight')
+                plt.close(mtw_fig)
+                mtw_generated_files.append(mtw_filename)
+                print(f'Turb/MTW map staged at {mtw_temp_filepath}')
+
+            if include_wind:
+                wind_fig = plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='turb_wind')
+                wind_filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.png'
+                wind_temp_filepath = os.path.join(wind_temp_dir, wind_filename)
+                wind_fig.savefig(wind_temp_filepath, dpi=150, bbox_inches='tight')
+                plt.close(wind_fig)
+                wind_generated_files.append(wind_filename)
+                print(f'Turb/Wind map staged at {wind_temp_filepath}')
+
+        if include_mtw:
+            print(f'\nFinished building {len(mtw_generated_files)} Turb/MTW frames. Publishing to {mtw_output_dir}...')
+            publish_generated_frames(mtw_output_dir, mtw_generated_files, mtw_temp_dir)
+
+        if include_wind:
+            print(f'Finished building {len(wind_generated_files)} Turb/Wind frames. Publishing to {wind_output_dir}...')
+            publish_generated_frames(wind_output_dir, wind_generated_files, wind_temp_dir)
+
+
 def generate_icon_bg_frames(forecast_hours, preferred_run_time=None):
     output_dir = 'images/BG/ICON'
     os.makedirs(output_dir, exist_ok=True)
@@ -2098,9 +2474,9 @@ def generate_icon_bg_frames(forecast_hours, preferred_run_time=None):
 
 # Main function
 def main():
-    parser = argparse.ArgumentParser(description='Generate BG forecast frames from GFS and/or ICON data.')
+    parser = argparse.ArgumentParser(description='Generate aviation forecast frames from GFS and/or ICON data.')
     parser.add_argument('--model', choices=['gfs', 'icon', 'both'], default='both')
-    parser.add_argument('--layer', choices=['bg', 'ts_flash', 'ts_severe', 'airmass_fzl', 'airmass_snow'], default='bg')
+    parser.add_argument('--layer', choices=['bg', 'ts_flash', 'ts_severe', 'airmass_fzl', 'airmass_snow', 'turb', 'turb_mtw', 'turb_wind'], default='bg')
     parser.add_argument('--start-hour', type=int, default=9)
     parser.add_argument('--end-hour', type=int, default=35)
     args = parser.parse_args()
@@ -2129,6 +2505,24 @@ def main():
         if args.model != 'gfs':
             raise ValueError('The airmass_snow layer is currently supported for GFS only')
         generate_gfs_airmass_snow_frames(forecast_hours)
+        return
+
+    if args.layer == 'turb':
+        if args.model != 'gfs':
+            raise ValueError('The turb layer is currently supported for GFS only')
+        generate_gfs_turb_frames(forecast_hours)
+        return
+
+    if args.layer == 'turb_mtw':
+        if args.model != 'gfs':
+            raise ValueError('The turb_mtw layer is currently supported for GFS only')
+        generate_gfs_turb_frames(forecast_hours, include_mtw=True, include_wind=False)
+        return
+
+    if args.layer == 'turb_wind':
+        if args.model != 'gfs':
+            raise ValueError('The turb_wind layer is currently supported for GFS only')
+        generate_gfs_turb_frames(forecast_hours, include_mtw=False, include_wind=True)
         return
 
     gfs_run_time = None
