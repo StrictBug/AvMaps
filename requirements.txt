@@ -1,0 +1,11 @@
+cartopy
+cfgrib
+eccodes
+matplotlib
+numpy
+pandas
+requests
+scipy
+shapely
+siphon
+xarray
