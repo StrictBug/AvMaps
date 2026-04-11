@@ -40,6 +40,11 @@ TAF_LABEL_DY = 0.12
 # runs (e.g. a single-frame re-render) skip the network entirely.
 ICON_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.icon_cache')
 
+TAF_LOCATION_ROWS_CACHE = None
+GAF_FEATURE_CACHE = None
+LAND_PREP_CACHE = None
+OCEAN_MASK_CACHE = {}
+
 
 def safe_remove_file(path):
     try:
@@ -61,6 +66,126 @@ def publish_generated_frames(output_dir, generated_files, temp_dir):
 
     print(f'Removed {removed_count} previously published frames from {output_dir}')
     print(f'Published {len(generated_files)} new frames to {output_dir}')
+
+
+def get_taf_location_rows():
+    global TAF_LOCATION_ROWS_CACHE
+    if TAF_LOCATION_ROWS_CACHE is None:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        taf_file = os.path.join(script_dir, 'geo files', 'TAF lat long.csv')
+        taf_data = pd.read_csv(taf_file, delimiter='\t')
+        TAF_LOCATION_ROWS_CACHE = [
+            (row.TAF, row.Latitude, row.Longitude)
+            for row in taf_data.itertuples(index=False)
+        ]
+    return TAF_LOCATION_ROWS_CACHE
+
+
+def get_gaf_feature():
+    global GAF_FEATURE_CACHE
+    if GAF_FEATURE_CACHE is None:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        gaf_shp = os.path.join(script_dir, 'geo files', 'GAF_Boundaries.shp')
+        reader = Reader(gaf_shp)
+        GAF_FEATURE_CACHE = ShapelyFeature(
+            reader.geometries(),
+            ccrs.PlateCarree(),
+            facecolor='none',
+            edgecolor='black',
+            linewidth=0.7,
+        )
+    return GAF_FEATURE_CACHE
+
+
+def get_prepared_land_geometry():
+    global LAND_PREP_CACHE
+    if LAND_PREP_CACHE is None:
+        print('Loading Natural Earth land geometry for ocean masking...')
+        land_shp = natural_earth(resolution='10m', category='physical', name='land')
+        land_reader = Reader(land_shp)
+        land_union = unary_union(list(land_reader.geometries()))
+        LAND_PREP_CACHE = prep(land_union)
+    return LAND_PREP_CACHE
+
+
+def get_ocean_mask(lons, lats):
+    cache_key = (
+        len(lats),
+        len(lons),
+        round(float(lats[0]), 4),
+        round(float(lats[-1]), 4),
+        round(float(lons[0]), 4),
+        round(float(lons[-1]), 4),
+    )
+    cached_mask = OCEAN_MASK_CACHE.get(cache_key)
+    if cached_mask is not None:
+        return cached_mask
+
+    print('Creating ocean mask from Natural Earth land data...')
+    land_prep = get_prepared_land_geometry()
+    lon_grid, lat_grid = np.meshgrid(lons, lats)
+    ocean_mask = np.zeros(lon_grid.shape, dtype=bool)
+
+    for i in range(lon_grid.shape[0]):
+        for j in range(lon_grid.shape[1]):
+            if not land_prep.contains(Point(lon_grid[i, j], lat_grid[i, j])):
+                ocean_mask[i, j] = True
+
+    OCEAN_MASK_CACHE[cache_key] = ocean_mask
+    print(f'Identified {np.sum(ocean_mask)} ocean grid points out of {ocean_mask.size} total')
+    return ocean_mask
+
+
+def count_image_files(directory):
+    return sum(
+        1
+        for entry in os.listdir(directory)
+        if os.path.isfile(os.path.join(directory, entry))
+        and entry.lower().endswith(REMOVABLE_IMAGE_EXTS)
+    )
+
+
+def swap_directory_into_place(source_dir, destination_dir):
+    parent_dir = os.path.dirname(destination_dir)
+    os.makedirs(parent_dir, exist_ok=True)
+
+    backup_dir = tempfile.mkdtemp(
+        prefix=f'.avmaps_backup_{os.path.basename(destination_dir)}_',
+        dir=parent_dir,
+    )
+    os.rmdir(backup_dir)
+
+    if os.path.exists(destination_dir):
+        os.replace(destination_dir, backup_dir)
+
+    try:
+        os.replace(source_dir, destination_dir)
+    except Exception:
+        if os.path.exists(backup_dir) and not os.path.exists(destination_dir):
+            os.replace(backup_dir, destination_dir)
+        raise
+    else:
+        if os.path.exists(backup_dir):
+            shutil.rmtree(backup_dir)
+
+
+def publish_staged_directories_atomically(staging_root, relative_dirs):
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    print('\nAll requested layers generated successfully. Publishing staged run...')
+
+    for relative_dir in relative_dirs:
+        staged_dir = os.path.join(staging_root, relative_dir)
+        live_dir = os.path.join(script_dir, relative_dir)
+
+        if not os.path.isdir(staged_dir):
+            raise RuntimeError(f'Missing staged output for {relative_dir}; aborting atomic publish')
+
+        image_count = count_image_files(staged_dir)
+        if image_count == 0:
+            raise RuntimeError(f'No image frames staged for {relative_dir}; aborting atomic publish')
+
+        swap_directory_into_place(staged_dir, live_dir)
+        print(f'Published {image_count} staged frames to {live_dir}')
 
 # Helper function to handle different GFS time dimension names
 def get_time_index(data_var):
@@ -1111,17 +1236,12 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
     taf_lats = []
     taf_names = []
     try:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        taf_file = os.path.join(script_dir, 'geo files', 'TAF lat long.csv')
-        taf_data = pd.read_csv(taf_file, delimiter='\t')
-        for idx, row in taf_data.iterrows():
-            lat = row['Latitude']
-            lon = row['Longitude']
+        for name, lat, lon in get_taf_location_rows():
             # Only include TAF points within the domain bounds
             # Also account for label offset so text remains inside the domain.
             if (plot_lat_min <= lat <= plot_lat_max and plot_lon_min <= lon <= plot_lon_max and
                 lon + TAF_LABEL_DX >= plot_lon_min and lat + TAF_LABEL_DY <= plot_lat_max):
-                taf_names.append(row['TAF'])
+                taf_names.append(name)
                 taf_lats.append(lat)
                 taf_lons.append(lon)
         print(f"Loaded {len(taf_names)} TAF locations within domain")
@@ -1133,12 +1253,7 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
     ax.add_feature(cfeature.BORDERS, linewidth=0.7, zorder=z_borders)
     
     # Add GAF boundaries from shapefile
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    gaf_shp = os.path.join(script_dir, 'geo files', 'GAF_Boundaries.shp')
-    reader = Reader(gaf_shp)
-    gaf_feature = ShapelyFeature(reader.geometries(), ccrs.PlateCarree(), 
-                     facecolor='none', edgecolor='black', linewidth=0.7)
-    ax.add_feature(gaf_feature, zorder=z_gaf)
+    ax.add_feature(get_gaf_feature(), zorder=z_gaf)
     
     # Set extent
     ax.set_extent([plot_lon_min, plot_lon_max, plot_lat_min, plot_lat_max], crs=ccrs.PlateCarree())
@@ -1170,35 +1285,8 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         elev_cmap = ListedColormap(elev_colors)
         elev_norm = BoundaryNorm(elev_levels, elev_cmap.N, clip=True)
 
-        # Create mask for ocean areas using Natural Earth land feature
-        print("Creating ocean mask from Natural Earth land data...")
-
-        # Load Natural Earth 10m land shapefile to identify land areas
-        land_shp = natural_earth(resolution='10m', category='physical', name='land')
-        land_reader = Reader(land_shp)
-        land_geoms = list(land_reader.geometries())
-
-        # Merge all land geometries and create prepared geometry for fast contains tests
-        land_union = unary_union(land_geoms)
-        land_prep = prep(land_union)
-
-        # Create boolean mask for ocean points (inverse of land)
-        ocean_mask = np.zeros_like(elevation, dtype=bool)
-
-        # Check each grid point - use prepared geometry for 10x speedup
-        for i in range(elevation.shape[0]):  # Iterate over first dimension
-            for j in range(elevation.shape[1]):  # Iterate over second dimension
-                lon = lon_grid[i, j]
-                lat = lat_grid[i, j]
-                point = Point(lon, lat)
-
-                # If point is NOT within land geometry, it's ocean
-                if not land_prep.contains(point):
-                    ocean_mask[i, j] = True
-
-        print(f"Identified {np.sum(ocean_mask)} ocean grid points out of {elevation.size} total")
-
-        # Create a modified elevation array where ocean areas are set to -1000
+        # Create a modified elevation array where ocean areas are set to -1000.
+        ocean_mask = get_ocean_mask(elev_lons, elev_lats)
         elev_masked = elevation.copy()
         elev_masked[ocean_mask] = -1000
 
@@ -2188,10 +2276,10 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
     
     return fig
 
-def generate_gfs_bg_frames(forecast_hours):
-    output_dir = 'images/BG/US'
+def generate_gfs_bg_frames(forecast_hours, output_dir='images/BG/US', latest_dataset=None, init_time=None):
     os.makedirs(output_dir, exist_ok=True)
-    latest_dataset, init_time = get_latest_gfs_dataset()
+    if latest_dataset is None or init_time is None:
+        latest_dataset, init_time = get_latest_gfs_dataset()
 
     # Generate the full new run in a temporary OS directory so the published folder stays stable
     with tempfile.TemporaryDirectory(prefix='avmaps_bg_us_') as temp_dir:
@@ -2220,10 +2308,10 @@ def generate_gfs_bg_frames(forecast_hours):
         publish_generated_frames(output_dir, generated_files, temp_dir)
 
 
-def generate_gfs_ts_flash_frames(forecast_hours):
-    output_dir = 'images/TS/Flash density'
+def generate_gfs_ts_flash_frames(forecast_hours, output_dir='images/TS/Flash density', latest_dataset=None, init_time=None):
     os.makedirs(output_dir, exist_ok=True)
-    latest_dataset, init_time = get_latest_gfs_dataset()
+    if latest_dataset is None or init_time is None:
+        latest_dataset, init_time = get_latest_gfs_dataset()
 
     with tempfile.TemporaryDirectory(prefix='avmaps_ts_flash_') as temp_dir:
         print(f'Generating {len(forecast_hours)} TS flash-density frames in temporary workspace: {temp_dir}')
@@ -2259,10 +2347,10 @@ def generate_gfs_ts_flash_frames(forecast_hours):
         publish_generated_frames(output_dir, generated_files, temp_dir)
 
 
-def generate_gfs_ts_severe_frames(forecast_hours):
-    output_dir = 'images/TS/Severe storm potential'
+def generate_gfs_ts_severe_frames(forecast_hours, output_dir='images/TS/Severe storm potential', latest_dataset=None, init_time=None):
     os.makedirs(output_dir, exist_ok=True)
-    latest_dataset, init_time = get_latest_gfs_dataset()
+    if latest_dataset is None or init_time is None:
+        latest_dataset, init_time = get_latest_gfs_dataset()
 
     with tempfile.TemporaryDirectory(prefix='avmaps_ts_severe_') as temp_dir:
         print(f'Generating {len(forecast_hours)} TS severe-potential frames in temporary workspace: {temp_dir}')
@@ -2298,10 +2386,10 @@ def generate_gfs_ts_severe_frames(forecast_hours):
         publish_generated_frames(output_dir, generated_files, temp_dir)
 
 
-def generate_gfs_airmass_fzl_frames(forecast_hours):
-    output_dir = 'images/Airmass/FZL'
+def generate_gfs_airmass_fzl_frames(forecast_hours, output_dir='images/Airmass/FZL', latest_dataset=None, init_time=None):
     os.makedirs(output_dir, exist_ok=True)
-    latest_dataset, init_time = get_latest_gfs_dataset()
+    if latest_dataset is None or init_time is None:
+        latest_dataset, init_time = get_latest_gfs_dataset()
 
     with tempfile.TemporaryDirectory(prefix='avmaps_airmass_fzl_') as temp_dir:
         print(f'Generating {len(forecast_hours)} Airmass/FZL frames in temporary workspace: {temp_dir}')
@@ -2338,10 +2426,10 @@ def generate_gfs_airmass_fzl_frames(forecast_hours):
         publish_generated_frames(output_dir, generated_files, temp_dir)
 
 
-def generate_gfs_airmass_snow_frames(forecast_hours):
-    output_dir = 'images/Airmass/Snow level'
+def generate_gfs_airmass_snow_frames(forecast_hours, output_dir='images/Airmass/Snow level', latest_dataset=None, init_time=None):
     os.makedirs(output_dir, exist_ok=True)
-    latest_dataset, init_time = get_latest_gfs_dataset()
+    if latest_dataset is None or init_time is None:
+        latest_dataset, init_time = get_latest_gfs_dataset()
 
     with tempfile.TemporaryDirectory(prefix='avmaps_airmass_snow_') as temp_dir:
         print(f'Generating {len(forecast_hours)} Airmass/Snow level frames in temporary workspace: {temp_dir}')
@@ -2353,7 +2441,7 @@ def generate_gfs_airmass_snow_frames(forecast_hours):
                 forecast_hour,
                 latest_dataset,
                 init_time,
-                include_ts_fields=True,
+                include_ts_fields=False,
                 include_airmass_fields=True,
             )
             print('Using raw hourly GFS precipitation and airmass fields')
@@ -2372,12 +2460,25 @@ def generate_gfs_airmass_snow_frames(forecast_hours):
         publish_generated_frames(output_dir, generated_files, temp_dir)
 
 
-def generate_gfs_turb_frames(forecast_hours, include_mtw=True, include_wind=True):
-    mtw_output_dir = 'images/Turb/MTW'
-    wind_output_dir = 'images/Turb/Wind'
-    os.makedirs(mtw_output_dir, exist_ok=True)
-    os.makedirs(wind_output_dir, exist_ok=True)
-    latest_dataset, init_time = get_latest_gfs_dataset()
+def _generate_gfs_turb_frames_internal(
+    forecast_hours,
+    include_mtw=True,
+    include_wind=True,
+    mtw_output_dir='images/Turb/MTW',
+    wind_output_dir='images/Turb/Wind',
+    latest_dataset=None,
+    init_time=None,
+):
+    if not include_mtw and not include_wind:
+        print('No turbulence outputs requested; nothing to do.')
+        return
+
+    if include_mtw:
+        os.makedirs(mtw_output_dir, exist_ok=True)
+    if include_wind:
+        os.makedirs(wind_output_dir, exist_ok=True)
+    if latest_dataset is None or init_time is None:
+        latest_dataset, init_time = get_latest_gfs_dataset()
 
     with tempfile.TemporaryDirectory(prefix='avmaps_turb_mtw_') as mtw_temp_dir, tempfile.TemporaryDirectory(prefix='avmaps_turb_wind_') as wind_temp_dir:
         targets = []
@@ -2385,10 +2486,12 @@ def generate_gfs_turb_frames(forecast_hours, include_mtw=True, include_wind=True
             targets.append('MTW')
         if include_wind:
             targets.append('Wind')
+
         print(
             f"Generating {len(forecast_hours)} Turb {'/'.join(targets)} frames in temporary workspaces: "
             f'{mtw_temp_dir} and {wind_temp_dir}'
         )
+
         mtw_generated_files = []
         wind_generated_files = []
 
@@ -2430,13 +2533,54 @@ def generate_gfs_turb_frames(forecast_hours, include_mtw=True, include_wind=True
             publish_generated_frames(wind_output_dir, wind_generated_files, wind_temp_dir)
 
 
-def generate_icon_bg_frames(forecast_hours, preferred_run_time=None):
-    output_dir = 'images/BG/ICON'
+def generate_gfs_turb_mtw_frames(forecast_hours, output_dir='images/Turb/MTW', latest_dataset=None, init_time=None):
+    _generate_gfs_turb_frames_internal(
+        forecast_hours,
+        include_mtw=True,
+        include_wind=False,
+        mtw_output_dir=output_dir,
+        latest_dataset=latest_dataset,
+        init_time=init_time,
+    )
+
+
+def generate_gfs_turb_wind_frames(forecast_hours, output_dir='images/Turb/Wind', latest_dataset=None, init_time=None):
+    _generate_gfs_turb_frames_internal(
+        forecast_hours,
+        include_mtw=False,
+        include_wind=True,
+        wind_output_dir=output_dir,
+        latest_dataset=latest_dataset,
+        init_time=init_time,
+    )
+
+
+def generate_gfs_turb_frames(
+    forecast_hours,
+    mtw_output_dir='images/Turb/MTW',
+    wind_output_dir='images/Turb/Wind',
+    latest_dataset=None,
+    init_time=None,
+):
+    _generate_gfs_turb_frames_internal(
+        forecast_hours,
+        include_mtw=True,
+        include_wind=True,
+        mtw_output_dir=mtw_output_dir,
+        wind_output_dir=wind_output_dir,
+        latest_dataset=latest_dataset,
+        init_time=init_time,
+    )
+
+
+def generate_icon_bg_frames(forecast_hours, preferred_run_time=None, output_dir='images/BG/ICON', icon_run=None, remap_state=None):
     os.makedirs(output_dir, exist_ok=True)
 
-    icon_run = get_latest_icon_run(target_time=preferred_run_time)
+    if icon_run is None:
+        icon_run = get_latest_icon_run(target_time=preferred_run_time)
     init_time = icon_run['init_time']
-    remap_state = _load_icon_static_remap(icon_run)
+    if remap_state is None:
+        remap_state = _load_icon_static_remap(icon_run)
 
     with tempfile.TemporaryDirectory(prefix='avmaps_bg_icon_') as temp_dir:
         print(f'Generating {len(forecast_hours)} ICON forecast frames in temporary workspace: {temp_dir}')
@@ -2472,16 +2616,112 @@ def generate_icon_bg_frames(forecast_hours, preferred_run_time=None):
         publish_generated_frames(output_dir, generated_files, temp_dir)
 
 
+def generate_all_layers_atomically(forecast_hours, model='both'):
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    staged_targets = []
+
+    gfs_latest_dataset = None
+    gfs_init_time = None
+    if model in ('gfs', 'both'):
+        gfs_latest_dataset, gfs_init_time = get_latest_gfs_dataset()
+        print(f"Locked GFS run for atomic publish: {gfs_init_time.strftime('%Y-%m-%d %H%MZ')}")
+
+    icon_run = None
+    icon_remap_state = None
+    if model in ('icon', 'both'):
+        preferred_time = gfs_init_time if model == 'both' else None
+        icon_run = get_latest_icon_run(target_time=preferred_time)
+        icon_remap_state = _load_icon_static_remap(icon_run)
+        print(f"Locked ICON run for atomic publish: {icon_run['init_time'].strftime('%Y-%m-%d %H%MZ')}")
+
+    with tempfile.TemporaryDirectory(prefix='.avmaps_atomic_publish_', dir=script_dir) as staging_root:
+        print(f'Building full staged run in {staging_root}')
+
+        def stage_path(*parts):
+            return os.path.join(staging_root, *parts)
+
+        if model in ('gfs', 'both'):
+            generate_gfs_ts_flash_frames(
+                forecast_hours,
+                output_dir=stage_path('images', 'TS', 'Flash density'),
+                latest_dataset=gfs_latest_dataset,
+                init_time=gfs_init_time,
+            )
+            staged_targets.append(os.path.join('images', 'TS', 'Flash density'))
+
+            generate_gfs_ts_severe_frames(
+                forecast_hours,
+                output_dir=stage_path('images', 'TS', 'Severe storm potential'),
+                latest_dataset=gfs_latest_dataset,
+                init_time=gfs_init_time,
+            )
+            staged_targets.append(os.path.join('images', 'TS', 'Severe storm potential'))
+
+            generate_gfs_airmass_fzl_frames(
+                forecast_hours,
+                output_dir=stage_path('images', 'Airmass', 'FZL'),
+                latest_dataset=gfs_latest_dataset,
+                init_time=gfs_init_time,
+            )
+            staged_targets.append(os.path.join('images', 'Airmass', 'FZL'))
+
+            generate_gfs_airmass_snow_frames(
+                forecast_hours,
+                output_dir=stage_path('images', 'Airmass', 'Snow level'),
+                latest_dataset=gfs_latest_dataset,
+                init_time=gfs_init_time,
+            )
+            staged_targets.append(os.path.join('images', 'Airmass', 'Snow level'))
+
+            generate_gfs_turb_frames(
+                forecast_hours,
+                mtw_output_dir=stage_path('images', 'Turb', 'MTW'),
+                wind_output_dir=stage_path('images', 'Turb', 'Wind'),
+                latest_dataset=gfs_latest_dataset,
+                init_time=gfs_init_time,
+            )
+            staged_targets.extend([
+                os.path.join('images', 'Turb', 'MTW'),
+                os.path.join('images', 'Turb', 'Wind'),
+            ])
+
+        if model in ('icon', 'both'):
+            generate_icon_bg_frames(
+                forecast_hours,
+                preferred_run_time=(gfs_init_time if model == 'both' else None),
+                output_dir=stage_path('images', 'BG', 'ICON'),
+                icon_run=icon_run,
+                remap_state=icon_remap_state,
+            )
+            staged_targets.append(os.path.join('images', 'BG', 'ICON'))
+
+        if model in ('gfs', 'both'):
+            generate_gfs_bg_frames(
+                forecast_hours,
+                output_dir=stage_path('images', 'BG', 'US'),
+                latest_dataset=gfs_latest_dataset,
+                init_time=gfs_init_time,
+            )
+            staged_targets.append(os.path.join('images', 'BG', 'US'))
+
+        publish_staged_directories_atomically(staging_root, staged_targets)
+        print(f'Atomic publish complete. Updated {len(staged_targets)} directories under {script_dir}/images')
+
+
 # Main function
 def main():
     parser = argparse.ArgumentParser(description='Generate aviation forecast frames from GFS and/or ICON data.')
     parser.add_argument('--model', choices=['gfs', 'icon', 'both'], default='both')
-    parser.add_argument('--layer', choices=['bg', 'ts_flash', 'ts_severe', 'airmass_fzl', 'airmass_snow', 'turb', 'turb_mtw', 'turb_wind'], default='bg')
+    parser.add_argument('--layer', choices=['bg', 'ts_flash', 'ts_severe', 'airmass_fzl', 'airmass_snow', 'turb', 'turb_mtw', 'turb_wind', 'all'], default='bg')
     parser.add_argument('--start-hour', type=int, default=9)
     parser.add_argument('--end-hour', type=int, default=35)
     args = parser.parse_args()
 
     forecast_hours = list(range(args.start_hour, args.end_hour + 1))
+
+    if args.layer == 'all':
+        generate_all_layers_atomically(forecast_hours, model=args.model)
+        return
 
     if args.layer == 'ts_flash':
         if args.model != 'gfs':
@@ -2516,13 +2756,13 @@ def main():
     if args.layer == 'turb_mtw':
         if args.model != 'gfs':
             raise ValueError('The turb_mtw layer is currently supported for GFS only')
-        generate_gfs_turb_frames(forecast_hours, include_mtw=True, include_wind=False)
+        generate_gfs_turb_mtw_frames(forecast_hours)
         return
 
     if args.layer == 'turb_wind':
         if args.model != 'gfs':
             raise ValueError('The turb_wind layer is currently supported for GFS only')
-        generate_gfs_turb_frames(forecast_hours, include_mtw=False, include_wind=True)
+        generate_gfs_turb_wind_frames(forecast_hours)
         return
 
     gfs_run_time = None

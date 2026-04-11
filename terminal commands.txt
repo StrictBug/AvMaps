@@ -1,0 +1,25 @@
+Updating all maps atomically (recommended)
+cd /workspaces/AvMaps
+python3 generate_maps.py --model both --layer all --start-hour 9 --end-hour 35
+python3 -m http.server 8000
+
+Testing / updating individual layers
+cd /workspaces/AvMaps
+python3 generate_maps.py --model both --layer bg --start-hour 9 --end-hour 35
+python3 generate_maps.py --model gfs --layer ts_flash --start-hour 9 --end-hour 35
+python3 generate_maps.py --model gfs --layer ts_severe --start-hour 9 --end-hour 35
+python3 generate_maps.py --model gfs --layer airmass_fzl --start-hour 9 --end-hour 35
+python3 generate_maps.py --model gfs --layer airmass_snow --start-hour 9 --end-hour 35
+python3 generate_maps.py --model gfs --layer turb_mtw --start-hour 9 --end-hour 35
+python3 generate_maps.py --model gfs --layer turb_wind --start-hour 9 --end-hour 35
+python3 -m http.server 8000
+
+Updating main repo
+cd /workspaces/AvMaps
+git status
+git add -A
+git commit -m "Describe your changes here"
+git push origin main
+
+update time
+2604111200:11m 42s

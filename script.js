@@ -88,52 +88,42 @@ async function discoverBgFramesForDirectory(directoryPath) {
     return frameInfo;
 }
 
-async function discoverBgFrames() {
-    const usFrames = await discoverBgFramesForDirectory('images/BG/US');
-    const iconFrames = await discoverBgFramesForDirectory('images/BG/ICON');
+function buildFramePairs(leftFrames, rightFrames, errorMessage) {
+    const leftByHour = new Map(leftFrames.map(frame => [frame.hour, frame.path]));
+    const rightByHour = new Map(rightFrames.map(frame => [frame.hour, frame.path]));
 
-    const usByHour = new Map(usFrames.map(frame => [frame.hour, frame.path]));
-    const iconByHour = new Map(iconFrames.map(frame => [frame.hour, frame.path]));
-
-    const commonHours = Array.from(usByHour.keys())
-        .filter(hour => iconByHour.has(hour))
+    const commonHours = Array.from(leftByHour.keys())
+        .filter(hour => rightByHour.has(hour))
         .sort((a, b) => a - b);
 
     const framePairs = commonHours.map(hour => ({
         hour,
-        leftPath: usByHour.get(hour),
-        rightPath: iconByHour.get(hour)
+        leftPath: leftByHour.get(hour),
+        rightPath: rightByHour.get(hour)
     }));
 
     if (framePairs.length === 0) {
-        throw new Error('No overlapping BG US/ICON frame hours found');
+        throw new Error(errorMessage);
     }
 
     return framePairs;
 }
 
+async function discoverFramePairs(leftDirectory, rightDirectory, errorMessage) {
+    const [leftFrames, rightFrames] = await Promise.all([
+        discoverBgFramesForDirectory(leftDirectory),
+        discoverBgFramesForDirectory(rightDirectory)
+    ]);
+
+    return buildFramePairs(leftFrames, rightFrames, errorMessage);
+}
+
+async function discoverBgFrames() {
+    return discoverFramePairs('images/BG/US', 'images/BG/ICON', 'No overlapping BG US/ICON frame hours found');
+}
+
 async function discoverTsFrames() {
-    const flashFrames = await discoverBgFramesForDirectory('images/TS/Flash density');
-    const severeFrames = await discoverBgFramesForDirectory('images/TS/Severe storm potential');
-
-    const flashByHour = new Map(flashFrames.map(frame => [frame.hour, frame.path]));
-    const severeByHour = new Map(severeFrames.map(frame => [frame.hour, frame.path]));
-
-    const commonHours = Array.from(flashByHour.keys())
-        .filter(hour => severeByHour.has(hour))
-        .sort((a, b) => a - b);
-
-    const framePairs = commonHours.map(hour => ({
-        hour,
-        leftPath: flashByHour.get(hour),
-        rightPath: severeByHour.get(hour)
-    }));
-
-    if (framePairs.length === 0) {
-        throw new Error('No overlapping TS flash/severe frame hours found');
-    }
-
-    return framePairs;
+    return discoverFramePairs('images/TS/Flash density', 'images/TS/Severe storm potential', 'No overlapping TS flash/severe frame hours found');
 }
 
 async function ensureBgFramesLoaded(forceRefresh = false) {
@@ -151,27 +141,7 @@ async function ensureTsFramesLoaded(forceRefresh = false) {
 }
 
 async function discoverAirmassFrames() {
-    const fzlFrames = await discoverBgFramesForDirectory('images/Airmass/FZL');
-    const snowFrames = await discoverBgFramesForDirectory('images/Airmass/Snow level');
-
-    const fzlByHour = new Map(fzlFrames.map(frame => [frame.hour, frame.path]));
-    const snowByHour = new Map(snowFrames.map(frame => [frame.hour, frame.path]));
-
-    const commonHours = Array.from(fzlByHour.keys())
-        .filter(hour => snowByHour.has(hour))
-        .sort((a, b) => a - b);
-
-    const framePairs = commonHours.map(hour => ({
-        hour,
-        leftPath: fzlByHour.get(hour),
-        rightPath: snowByHour.get(hour)
-    }));
-
-    if (framePairs.length === 0) {
-        throw new Error('No overlapping Airmass FZL/Snow frame hours found');
-    }
-
-    return framePairs;
+    return discoverFramePairs('images/Airmass/FZL', 'images/Airmass/Snow level', 'No overlapping Airmass FZL/Snow frame hours found');
 }
 
 async function ensureAirmassFramesLoaded(forceRefresh = false) {
@@ -182,27 +152,7 @@ async function ensureAirmassFramesLoaded(forceRefresh = false) {
 }
 
 async function discoverTurbFrames() {
-    const mtwFrames = await discoverBgFramesForDirectory('images/Turb/MTW');
-    const windFrames = await discoverBgFramesForDirectory('images/Turb/Wind');
-
-    const mtwByHour = new Map(mtwFrames.map(frame => [frame.hour, frame.path]));
-    const windByHour = new Map(windFrames.map(frame => [frame.hour, frame.path]));
-
-    const commonHours = Array.from(mtwByHour.keys())
-        .filter(hour => windByHour.has(hour))
-        .sort((a, b) => a - b);
-
-    const framePairs = commonHours.map(hour => ({
-        hour,
-        leftPath: mtwByHour.get(hour),
-        rightPath: windByHour.get(hour)
-    }));
-
-    if (framePairs.length === 0) {
-        throw new Error('No overlapping Turb MTW/Wind frame hours found');
-    }
-
-    return framePairs;
+    return discoverFramePairs('images/Turb/MTW', 'images/Turb/Wind', 'No overlapping Turb MTW/Wind frame hours found');
 }
 
 async function ensureTurbFramesLoaded(forceRefresh = false) {
@@ -212,18 +162,17 @@ async function ensureTurbFramesLoaded(forceRefresh = false) {
     return turbFramePairs;
 }
 
+function getFramePairsForCategory(category) {
+    if (category === 'BG') return bgFramePairs;
+    if (category === 'TS') return tsFramePairs;
+    if (category === 'Airmass') return airmassFramePairs;
+    if (category === 'Turb') return turbFramePairs;
+    return [];
+}
+
 function setMaxFramesForCategory(category) {
-    if (category === 'BG' && bgFramePairs.length > 0) {
-        maxFrames = bgFramePairs.length;
-    } else if (category === 'TS' && tsFramePairs.length > 0) {
-        maxFrames = tsFramePairs.length;
-    } else if (category === 'Airmass' && airmassFramePairs.length > 0) {
-        maxFrames = airmassFramePairs.length;
-    } else if (category === 'Turb' && turbFramePairs.length > 0) {
-        maxFrames = turbFramePairs.length;
-    } else {
-        maxFrames = DEFAULT_MAX_FRAMES;
-    }
+    const framePairs = getFramePairsForCategory(category);
+    maxFrames = framePairs.length > 0 ? framePairs.length : DEFAULT_MAX_FRAMES;
 
     frameSlider.max = maxFrames;
     currentFrame = Math.min(currentFrame, maxFrames);
@@ -420,83 +369,21 @@ function updateImages() {
     const config = imageConfig[currentCategory];
     if (!config) return;
 
-    if (currentCategory === 'BG') {
-        if (bgFramePairs.length === 0) {
-            console.warn('No BG frames available to display.');
+    const framePairs = getFramePairsForCategory(currentCategory);
+    if (framePairs.length > 0) {
+        const framePair = framePairs[currentFrame - 1];
+        if (!framePair) {
+            console.warn(`No ${currentCategory} frame available for index ${currentFrame}.`);
             return;
         }
-
-        const framePair = bgFramePairs[currentFrame - 1];
-        const frameHour = framePair.hour;
 
         leftImage.classList.remove('error');
         rightImage.classList.remove('error');
 
         leftImage.src = framePair.leftPath;
         rightImage.src = framePair.rightPath;
-
-        leftImage.alt = `US - Hour ${frameHour}`;
-        rightImage.alt = `ICON - Hour ${frameHour}`;
-        return;
-    }
-
-    if (currentCategory === 'TS') {
-        if (tsFramePairs.length === 0) {
-            console.warn('No TS frames available to display.');
-            return;
-        }
-
-        const framePair = tsFramePairs[currentFrame - 1];
-        const frameHour = framePair.hour;
-
-        leftImage.classList.remove('error');
-        rightImage.classList.remove('error');
-
-        leftImage.src = framePair.leftPath;
-        rightImage.src = framePair.rightPath;
-
-        leftImage.alt = `Flash Density - Hour ${frameHour}`;
-        rightImage.alt = `Severe Storm Potential - Hour ${frameHour}`;
-        return;
-    }
-
-    if (currentCategory === 'Airmass') {
-        if (airmassFramePairs.length === 0) {
-            console.warn('No Airmass frame pairs available to display.');
-            return;
-        }
-
-        const framePair = airmassFramePairs[currentFrame - 1];
-        const frameHour = framePair.hour;
-
-        leftImage.classList.remove('error');
-        rightImage.classList.remove('error');
-
-        leftImage.src = framePair.leftPath;
-        rightImage.src = framePair.rightPath;
-
-        leftImage.alt = `FZL - Hour ${frameHour}`;
-        rightImage.alt = `Snow Level - Hour ${frameHour}`;
-        return;
-    }
-
-    if (currentCategory === 'Turb') {
-        if (turbFramePairs.length === 0) {
-            console.warn('No Turb frame pairs available to display.');
-            return;
-        }
-
-        const framePair = turbFramePairs[currentFrame - 1];
-        const frameHour = framePair.hour;
-
-        leftImage.classList.remove('error');
-        rightImage.classList.remove('error');
-
-        leftImage.src = framePair.leftPath;
-        rightImage.src = framePair.rightPath;
-
-        leftImage.alt = `MTW - Hour ${frameHour}`;
-        rightImage.alt = `Wind - Hour ${frameHour}`;
+        leftImage.alt = `${config.left.title} - Hour ${framePair.hour}`;
+        rightImage.alt = `${config.right.title} - Hour ${framePair.hour}`;
         return;
     }
     
@@ -552,41 +439,9 @@ function preloadImages(category) {
     const config = imageConfig[category];
     if (!config) return;
 
-    if (category === 'BG') {
-        bgFramePairs.forEach(framePair => {
-            const leftImg = new Image();
-            leftImg.src = framePair.leftPath;
-
-            const rightImg = new Image();
-            rightImg.src = framePair.rightPath;
-        });
-        return;
-    }
-
-    if (category === 'TS') {
-        tsFramePairs.forEach(framePair => {
-            const leftImg = new Image();
-            leftImg.src = framePair.leftPath;
-
-            const rightImg = new Image();
-            rightImg.src = framePair.rightPath;
-        });
-        return;
-    }
-
-    if (category === 'Airmass') {
-        airmassFramePairs.forEach(framePair => {
-            const leftImg = new Image();
-            leftImg.src = framePair.leftPath;
-
-            const rightImg = new Image();
-            rightImg.src = framePair.rightPath;
-        });
-        return;
-    }
-
-    if (category === 'Turb') {
-        turbFramePairs.forEach(framePair => {
+    const framePairs = getFramePairsForCategory(category);
+    if (framePairs.length > 0) {
+        framePairs.forEach(framePair => {
             const leftImg = new Image();
             leftImg.src = framePair.leftPath;
 
@@ -613,30 +468,24 @@ function preloadImages(category) {
 
 // Preload images for better performance
 window.addEventListener('load', async function() {
-    try {
-        await ensureBgFramesLoaded();
-        setMaxFramesForCategory('BG');
-    } catch (error) {
-        console.warn('Could not preload BG frames dynamically:', error);
-    }
-
-    try {
-        await ensureTsFramesLoaded();
-    } catch (error) {
-        console.warn('Could not preload TS frames dynamically:', error);
-    }
-
-    try {
-        await ensureAirmassFramesLoaded();
-    } catch (error) {
-        console.warn('Could not preload Airmass frames dynamically:', error);
-    }
-
-    try {
-        await ensureTurbFramesLoaded();
-    } catch (error) {
-        console.warn('Could not preload Turb frames dynamically:', error);
-    }
+    await Promise.all([
+        ensureBgFramesLoaded()
+            .then(() => {
+                setMaxFramesForCategory('BG');
+            })
+            .catch(error => {
+                console.warn('Could not preload BG frames dynamically:', error);
+            }),
+        ensureTsFramesLoaded().catch(error => {
+            console.warn('Could not preload TS frames dynamically:', error);
+        }),
+        ensureAirmassFramesLoaded().catch(error => {
+            console.warn('Could not preload Airmass frames dynamically:', error);
+        }),
+        ensureTurbFramesLoaded().catch(error => {
+            console.warn('Could not preload Turb frames dynamically:', error);
+        })
+    ]);
 
     // Preload images for all categories
     Object.keys(imageConfig).forEach(category => {
