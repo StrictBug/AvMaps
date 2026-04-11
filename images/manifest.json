@@ -1,0 +1,553 @@
+{
+  "generatedAt": "2026-04-11T20:09:33.046869+00:00",
+  "categories": {
+    "BG": [
+      {
+        "hour": 9,
+        "leftPath": "images/BG/US/GFS_20260411_12_09.png",
+        "rightPath": "images/BG/ICON/ICON_20260411_12_09.png"
+      },
+      {
+        "hour": 10,
+        "leftPath": "images/BG/US/GFS_20260411_12_10.png",
+        "rightPath": "images/BG/ICON/ICON_20260411_12_10.png"
+      },
+      {
+        "hour": 11,
+        "leftPath": "images/BG/US/GFS_20260411_12_11.png",
+        "rightPath": "images/BG/ICON/ICON_20260411_12_11.png"
+      },
+      {
+        "hour": 12,
+        "leftPath": "images/BG/US/GFS_20260411_12_12.png",
+        "rightPath": "images/BG/ICON/ICON_20260411_12_12.png"
+      },
+      {
+        "hour": 13,
+        "leftPath": "images/BG/US/GFS_20260411_12_13.png",
+        "rightPath": "images/BG/ICON/ICON_20260411_12_13.png"
+      },
+      {
+        "hour": 14,
+        "leftPath": "images/BG/US/GFS_20260411_12_14.png",
+        "rightPath": "images/BG/ICON/ICON_20260411_12_14.png"
+      },
+      {
+        "hour": 15,
+        "leftPath": "images/BG/US/GFS_20260411_12_15.png",
+        "rightPath": "images/BG/ICON/ICON_20260411_12_15.png"
+      },
+      {
+        "hour": 16,
+        "leftPath": "images/BG/US/GFS_20260411_12_16.png",
+        "rightPath": "images/BG/ICON/ICON_20260411_12_16.png"
+      },
+      {
+        "hour": 17,
+        "leftPath": "images/BG/US/GFS_20260411_12_17.png",
+        "rightPath": "images/BG/ICON/ICON_20260411_12_17.png"
+      },
+      {
+        "hour": 18,
+        "leftPath": "images/BG/US/GFS_20260411_12_18.png",
+        "rightPath": "images/BG/ICON/ICON_20260411_12_18.png"
+      },
+      {
+        "hour": 19,
+        "leftPath": "images/BG/US/GFS_20260411_12_19.png",
+        "rightPath": "images/BG/ICON/ICON_20260411_12_19.png"
+      },
+      {
+        "hour": 20,
+        "leftPath": "images/BG/US/GFS_20260411_12_20.png",
+        "rightPath": "images/BG/ICON/ICON_20260411_12_20.png"
+      },
+      {
+        "hour": 21,
+        "leftPath": "images/BG/US/GFS_20260411_12_21.png",
+        "rightPath": "images/BG/ICON/ICON_20260411_12_21.png"
+      },
+      {
+        "hour": 22,
+        "leftPath": "images/BG/US/GFS_20260411_12_22.png",
+        "rightPath": "images/BG/ICON/ICON_20260411_12_22.png"
+      },
+      {
+        "hour": 23,
+        "leftPath": "images/BG/US/GFS_20260411_12_23.png",
+        "rightPath": "images/BG/ICON/ICON_20260411_12_23.png"
+      },
+      {
+        "hour": 24,
+        "leftPath": "images/BG/US/GFS_20260411_12_24.png",
+        "rightPath": "images/BG/ICON/ICON_20260411_12_24.png"
+      },
+      {
+        "hour": 25,
+        "leftPath": "images/BG/US/GFS_20260411_12_25.png",
+        "rightPath": "images/BG/ICON/ICON_20260411_12_25.png"
+      },
+      {
+        "hour": 26,
+        "leftPath": "images/BG/US/GFS_20260411_12_26.png",
+        "rightPath": "images/BG/ICON/ICON_20260411_12_26.png"
+      },
+      {
+        "hour": 27,
+        "leftPath": "images/BG/US/GFS_20260411_12_27.png",
+        "rightPath": "images/BG/ICON/ICON_20260411_12_27.png"
+      },
+      {
+        "hour": 28,
+        "leftPath": "images/BG/US/GFS_20260411_12_28.png",
+        "rightPath": "images/BG/ICON/ICON_20260411_12_28.png"
+      },
+      {
+        "hour": 29,
+        "leftPath": "images/BG/US/GFS_20260411_12_29.png",
+        "rightPath": "images/BG/ICON/ICON_20260411_12_29.png"
+      },
+      {
+        "hour": 30,
+        "leftPath": "images/BG/US/GFS_20260411_12_30.png",
+        "rightPath": "images/BG/ICON/ICON_20260411_12_30.png"
+      },
+      {
+        "hour": 31,
+        "leftPath": "images/BG/US/GFS_20260411_12_31.png",
+        "rightPath": "images/BG/ICON/ICON_20260411_12_31.png"
+      },
+      {
+        "hour": 32,
+        "leftPath": "images/BG/US/GFS_20260411_12_32.png",
+        "rightPath": "images/BG/ICON/ICON_20260411_12_32.png"
+      },
+      {
+        "hour": 33,
+        "leftPath": "images/BG/US/GFS_20260411_12_33.png",
+        "rightPath": "images/BG/ICON/ICON_20260411_12_33.png"
+      },
+      {
+        "hour": 34,
+        "leftPath": "images/BG/US/GFS_20260411_12_34.png",
+        "rightPath": "images/BG/ICON/ICON_20260411_12_34.png"
+      },
+      {
+        "hour": 35,
+        "leftPath": "images/BG/US/GFS_20260411_12_35.png",
+        "rightPath": "images/BG/ICON/ICON_20260411_12_35.png"
+      }
+    ],
+    "TS": [
+      {
+        "hour": 9,
+        "leftPath": "images/TS/Flash density/GFS_20260411_12_09.png",
+        "rightPath": "images/TS/Severe storm potential/GFS_20260411_12_09.png"
+      },
+      {
+        "hour": 10,
+        "leftPath": "images/TS/Flash density/GFS_20260411_12_10.png",
+        "rightPath": "images/TS/Severe storm potential/GFS_20260411_12_10.png"
+      },
+      {
+        "hour": 11,
+        "leftPath": "images/TS/Flash density/GFS_20260411_12_11.png",
+        "rightPath": "images/TS/Severe storm potential/GFS_20260411_12_11.png"
+      },
+      {
+        "hour": 12,
+        "leftPath": "images/TS/Flash density/GFS_20260411_12_12.png",
+        "rightPath": "images/TS/Severe storm potential/GFS_20260411_12_12.png"
+      },
+      {
+        "hour": 13,
+        "leftPath": "images/TS/Flash density/GFS_20260411_12_13.png",
+        "rightPath": "images/TS/Severe storm potential/GFS_20260411_12_13.png"
+      },
+      {
+        "hour": 14,
+        "leftPath": "images/TS/Flash density/GFS_20260411_12_14.png",
+        "rightPath": "images/TS/Severe storm potential/GFS_20260411_12_14.png"
+      },
+      {
+        "hour": 15,
+        "leftPath": "images/TS/Flash density/GFS_20260411_12_15.png",
+        "rightPath": "images/TS/Severe storm potential/GFS_20260411_12_15.png"
+      },
+      {
+        "hour": 16,
+        "leftPath": "images/TS/Flash density/GFS_20260411_12_16.png",
+        "rightPath": "images/TS/Severe storm potential/GFS_20260411_12_16.png"
+      },
+      {
+        "hour": 17,
+        "leftPath": "images/TS/Flash density/GFS_20260411_12_17.png",
+        "rightPath": "images/TS/Severe storm potential/GFS_20260411_12_17.png"
+      },
+      {
+        "hour": 18,
+        "leftPath": "images/TS/Flash density/GFS_20260411_12_18.png",
+        "rightPath": "images/TS/Severe storm potential/GFS_20260411_12_18.png"
+      },
+      {
+        "hour": 19,
+        "leftPath": "images/TS/Flash density/GFS_20260411_12_19.png",
+        "rightPath": "images/TS/Severe storm potential/GFS_20260411_12_19.png"
+      },
+      {
+        "hour": 20,
+        "leftPath": "images/TS/Flash density/GFS_20260411_12_20.png",
+        "rightPath": "images/TS/Severe storm potential/GFS_20260411_12_20.png"
+      },
+      {
+        "hour": 21,
+        "leftPath": "images/TS/Flash density/GFS_20260411_12_21.png",
+        "rightPath": "images/TS/Severe storm potential/GFS_20260411_12_21.png"
+      },
+      {
+        "hour": 22,
+        "leftPath": "images/TS/Flash density/GFS_20260411_12_22.png",
+        "rightPath": "images/TS/Severe storm potential/GFS_20260411_12_22.png"
+      },
+      {
+        "hour": 23,
+        "leftPath": "images/TS/Flash density/GFS_20260411_12_23.png",
+        "rightPath": "images/TS/Severe storm potential/GFS_20260411_12_23.png"
+      },
+      {
+        "hour": 24,
+        "leftPath": "images/TS/Flash density/GFS_20260411_12_24.png",
+        "rightPath": "images/TS/Severe storm potential/GFS_20260411_12_24.png"
+      },
+      {
+        "hour": 25,
+        "leftPath": "images/TS/Flash density/GFS_20260411_12_25.png",
+        "rightPath": "images/TS/Severe storm potential/GFS_20260411_12_25.png"
+      },
+      {
+        "hour": 26,
+        "leftPath": "images/TS/Flash density/GFS_20260411_12_26.png",
+        "rightPath": "images/TS/Severe storm potential/GFS_20260411_12_26.png"
+      },
+      {
+        "hour": 27,
+        "leftPath": "images/TS/Flash density/GFS_20260411_12_27.png",
+        "rightPath": "images/TS/Severe storm potential/GFS_20260411_12_27.png"
+      },
+      {
+        "hour": 28,
+        "leftPath": "images/TS/Flash density/GFS_20260411_12_28.png",
+        "rightPath": "images/TS/Severe storm potential/GFS_20260411_12_28.png"
+      },
+      {
+        "hour": 29,
+        "leftPath": "images/TS/Flash density/GFS_20260411_12_29.png",
+        "rightPath": "images/TS/Severe storm potential/GFS_20260411_12_29.png"
+      },
+      {
+        "hour": 30,
+        "leftPath": "images/TS/Flash density/GFS_20260411_12_30.png",
+        "rightPath": "images/TS/Severe storm potential/GFS_20260411_12_30.png"
+      },
+      {
+        "hour": 31,
+        "leftPath": "images/TS/Flash density/GFS_20260411_12_31.png",
+        "rightPath": "images/TS/Severe storm potential/GFS_20260411_12_31.png"
+      },
+      {
+        "hour": 32,
+        "leftPath": "images/TS/Flash density/GFS_20260411_12_32.png",
+        "rightPath": "images/TS/Severe storm potential/GFS_20260411_12_32.png"
+      },
+      {
+        "hour": 33,
+        "leftPath": "images/TS/Flash density/GFS_20260411_12_33.png",
+        "rightPath": "images/TS/Severe storm potential/GFS_20260411_12_33.png"
+      },
+      {
+        "hour": 34,
+        "leftPath": "images/TS/Flash density/GFS_20260411_12_34.png",
+        "rightPath": "images/TS/Severe storm potential/GFS_20260411_12_34.png"
+      },
+      {
+        "hour": 35,
+        "leftPath": "images/TS/Flash density/GFS_20260411_12_35.png",
+        "rightPath": "images/TS/Severe storm potential/GFS_20260411_12_35.png"
+      }
+    ],
+    "Airmass": [
+      {
+        "hour": 9,
+        "leftPath": "images/Airmass/FZL/GFS_20260411_12_09.png",
+        "rightPath": "images/Airmass/Snow level/GFS_20260411_12_09.png"
+      },
+      {
+        "hour": 10,
+        "leftPath": "images/Airmass/FZL/GFS_20260411_12_10.png",
+        "rightPath": "images/Airmass/Snow level/GFS_20260411_12_10.png"
+      },
+      {
+        "hour": 11,
+        "leftPath": "images/Airmass/FZL/GFS_20260411_12_11.png",
+        "rightPath": "images/Airmass/Snow level/GFS_20260411_12_11.png"
+      },
+      {
+        "hour": 12,
+        "leftPath": "images/Airmass/FZL/GFS_20260411_12_12.png",
+        "rightPath": "images/Airmass/Snow level/GFS_20260411_12_12.png"
+      },
+      {
+        "hour": 13,
+        "leftPath": "images/Airmass/FZL/GFS_20260411_12_13.png",
+        "rightPath": "images/Airmass/Snow level/GFS_20260411_12_13.png"
+      },
+      {
+        "hour": 14,
+        "leftPath": "images/Airmass/FZL/GFS_20260411_12_14.png",
+        "rightPath": "images/Airmass/Snow level/GFS_20260411_12_14.png"
+      },
+      {
+        "hour": 15,
+        "leftPath": "images/Airmass/FZL/GFS_20260411_12_15.png",
+        "rightPath": "images/Airmass/Snow level/GFS_20260411_12_15.png"
+      },
+      {
+        "hour": 16,
+        "leftPath": "images/Airmass/FZL/GFS_20260411_12_16.png",
+        "rightPath": "images/Airmass/Snow level/GFS_20260411_12_16.png"
+      },
+      {
+        "hour": 17,
+        "leftPath": "images/Airmass/FZL/GFS_20260411_12_17.png",
+        "rightPath": "images/Airmass/Snow level/GFS_20260411_12_17.png"
+      },
+      {
+        "hour": 18,
+        "leftPath": "images/Airmass/FZL/GFS_20260411_12_18.png",
+        "rightPath": "images/Airmass/Snow level/GFS_20260411_12_18.png"
+      },
+      {
+        "hour": 19,
+        "leftPath": "images/Airmass/FZL/GFS_20260411_12_19.png",
+        "rightPath": "images/Airmass/Snow level/GFS_20260411_12_19.png"
+      },
+      {
+        "hour": 20,
+        "leftPath": "images/Airmass/FZL/GFS_20260411_12_20.png",
+        "rightPath": "images/Airmass/Snow level/GFS_20260411_12_20.png"
+      },
+      {
+        "hour": 21,
+        "leftPath": "images/Airmass/FZL/GFS_20260411_12_21.png",
+        "rightPath": "images/Airmass/Snow level/GFS_20260411_12_21.png"
+      },
+      {
+        "hour": 22,
+        "leftPath": "images/Airmass/FZL/GFS_20260411_12_22.png",
+        "rightPath": "images/Airmass/Snow level/GFS_20260411_12_22.png"
+      },
+      {
+        "hour": 23,
+        "leftPath": "images/Airmass/FZL/GFS_20260411_12_23.png",
+        "rightPath": "images/Airmass/Snow level/GFS_20260411_12_23.png"
+      },
+      {
+        "hour": 24,
+        "leftPath": "images/Airmass/FZL/GFS_20260411_12_24.png",
+        "rightPath": "images/Airmass/Snow level/GFS_20260411_12_24.png"
+      },
+      {
+        "hour": 25,
+        "leftPath": "images/Airmass/FZL/GFS_20260411_12_25.png",
+        "rightPath": "images/Airmass/Snow level/GFS_20260411_12_25.png"
+      },
+      {
+        "hour": 26,
+        "leftPath": "images/Airmass/FZL/GFS_20260411_12_26.png",
+        "rightPath": "images/Airmass/Snow level/GFS_20260411_12_26.png"
+      },
+      {
+        "hour": 27,
+        "leftPath": "images/Airmass/FZL/GFS_20260411_12_27.png",
+        "rightPath": "images/Airmass/Snow level/GFS_20260411_12_27.png"
+      },
+      {
+        "hour": 28,
+        "leftPath": "images/Airmass/FZL/GFS_20260411_12_28.png",
+        "rightPath": "images/Airmass/Snow level/GFS_20260411_12_28.png"
+      },
+      {
+        "hour": 29,
+        "leftPath": "images/Airmass/FZL/GFS_20260411_12_29.png",
+        "rightPath": "images/Airmass/Snow level/GFS_20260411_12_29.png"
+      },
+      {
+        "hour": 30,
+        "leftPath": "images/Airmass/FZL/GFS_20260411_12_30.png",
+        "rightPath": "images/Airmass/Snow level/GFS_20260411_12_30.png"
+      },
+      {
+        "hour": 31,
+        "leftPath": "images/Airmass/FZL/GFS_20260411_12_31.png",
+        "rightPath": "images/Airmass/Snow level/GFS_20260411_12_31.png"
+      },
+      {
+        "hour": 32,
+        "leftPath": "images/Airmass/FZL/GFS_20260411_12_32.png",
+        "rightPath": "images/Airmass/Snow level/GFS_20260411_12_32.png"
+      },
+      {
+        "hour": 33,
+        "leftPath": "images/Airmass/FZL/GFS_20260411_12_33.png",
+        "rightPath": "images/Airmass/Snow level/GFS_20260411_12_33.png"
+      },
+      {
+        "hour": 34,
+        "leftPath": "images/Airmass/FZL/GFS_20260411_12_34.png",
+        "rightPath": "images/Airmass/Snow level/GFS_20260411_12_34.png"
+      },
+      {
+        "hour": 35,
+        "leftPath": "images/Airmass/FZL/GFS_20260411_12_35.png",
+        "rightPath": "images/Airmass/Snow level/GFS_20260411_12_35.png"
+      }
+    ],
+    "Turb": [
+      {
+        "hour": 9,
+        "leftPath": "images/Turb/MTW/GFS_20260411_12_09.png",
+        "rightPath": "images/Turb/Wind/GFS_20260411_12_09.png"
+      },
+      {
+        "hour": 10,
+        "leftPath": "images/Turb/MTW/GFS_20260411_12_10.png",
+        "rightPath": "images/Turb/Wind/GFS_20260411_12_10.png"
+      },
+      {
+        "hour": 11,
+        "leftPath": "images/Turb/MTW/GFS_20260411_12_11.png",
+        "rightPath": "images/Turb/Wind/GFS_20260411_12_11.png"
+      },
+      {
+        "hour": 12,
+        "leftPath": "images/Turb/MTW/GFS_20260411_12_12.png",
+        "rightPath": "images/Turb/Wind/GFS_20260411_12_12.png"
+      },
+      {
+        "hour": 13,
+        "leftPath": "images/Turb/MTW/GFS_20260411_12_13.png",
+        "rightPath": "images/Turb/Wind/GFS_20260411_12_13.png"
+      },
+      {
+        "hour": 14,
+        "leftPath": "images/Turb/MTW/GFS_20260411_12_14.png",
+        "rightPath": "images/Turb/Wind/GFS_20260411_12_14.png"
+      },
+      {
+        "hour": 15,
+        "leftPath": "images/Turb/MTW/GFS_20260411_12_15.png",
+        "rightPath": "images/Turb/Wind/GFS_20260411_12_15.png"
+      },
+      {
+        "hour": 16,
+        "leftPath": "images/Turb/MTW/GFS_20260411_12_16.png",
+        "rightPath": "images/Turb/Wind/GFS_20260411_12_16.png"
+      },
+      {
+        "hour": 17,
+        "leftPath": "images/Turb/MTW/GFS_20260411_12_17.png",
+        "rightPath": "images/Turb/Wind/GFS_20260411_12_17.png"
+      },
+      {
+        "hour": 18,
+        "leftPath": "images/Turb/MTW/GFS_20260411_12_18.png",
+        "rightPath": "images/Turb/Wind/GFS_20260411_12_18.png"
+      },
+      {
+        "hour": 19,
+        "leftPath": "images/Turb/MTW/GFS_20260411_12_19.png",
+        "rightPath": "images/Turb/Wind/GFS_20260411_12_19.png"
+      },
+      {
+        "hour": 20,
+        "leftPath": "images/Turb/MTW/GFS_20260411_12_20.png",
+        "rightPath": "images/Turb/Wind/GFS_20260411_12_20.png"
+      },
+      {
+        "hour": 21,
+        "leftPath": "images/Turb/MTW/GFS_20260411_12_21.png",
+        "rightPath": "images/Turb/Wind/GFS_20260411_12_21.png"
+      },
+      {
+        "hour": 22,
+        "leftPath": "images/Turb/MTW/GFS_20260411_12_22.png",
+        "rightPath": "images/Turb/Wind/GFS_20260411_12_22.png"
+      },
+      {
+        "hour": 23,
+        "leftPath": "images/Turb/MTW/GFS_20260411_12_23.png",
+        "rightPath": "images/Turb/Wind/GFS_20260411_12_23.png"
+      },
+      {
+        "hour": 24,
+        "leftPath": "images/Turb/MTW/GFS_20260411_12_24.png",
+        "rightPath": "images/Turb/Wind/GFS_20260411_12_24.png"
+      },
+      {
+        "hour": 25,
+        "leftPath": "images/Turb/MTW/GFS_20260411_12_25.png",
+        "rightPath": "images/Turb/Wind/GFS_20260411_12_25.png"
+      },
+      {
+        "hour": 26,
+        "leftPath": "images/Turb/MTW/GFS_20260411_12_26.png",
+        "rightPath": "images/Turb/Wind/GFS_20260411_12_26.png"
+      },
+      {
+        "hour": 27,
+        "leftPath": "images/Turb/MTW/GFS_20260411_12_27.png",
+        "rightPath": "images/Turb/Wind/GFS_20260411_12_27.png"
+      },
+      {
+        "hour": 28,
+        "leftPath": "images/Turb/MTW/GFS_20260411_12_28.png",
+        "rightPath": "images/Turb/Wind/GFS_20260411_12_28.png"
+      },
+      {
+        "hour": 29,
+        "leftPath": "images/Turb/MTW/GFS_20260411_12_29.png",
+        "rightPath": "images/Turb/Wind/GFS_20260411_12_29.png"
+      },
+      {
+        "hour": 30,
+        "leftPath": "images/Turb/MTW/GFS_20260411_12_30.png",
+        "rightPath": "images/Turb/Wind/GFS_20260411_12_30.png"
+      },
+      {
+        "hour": 31,
+        "leftPath": "images/Turb/MTW/GFS_20260411_12_31.png",
+        "rightPath": "images/Turb/Wind/GFS_20260411_12_31.png"
+      },
+      {
+        "hour": 32,
+        "leftPath": "images/Turb/MTW/GFS_20260411_12_32.png",
+        "rightPath": "images/Turb/Wind/GFS_20260411_12_32.png"
+      },
+      {
+        "hour": 33,
+        "leftPath": "images/Turb/MTW/GFS_20260411_12_33.png",
+        "rightPath": "images/Turb/Wind/GFS_20260411_12_33.png"
+      },
+      {
+        "hour": 34,
+        "leftPath": "images/Turb/MTW/GFS_20260411_12_34.png",
+        "rightPath": "images/Turb/Wind/GFS_20260411_12_34.png"
+      },
+      {
+        "hour": 35,
+        "leftPath": "images/Turb/MTW/GFS_20260411_12_35.png",
+        "rightPath": "images/Turb/Wind/GFS_20260411_12_35.png"
+      }
+    ]
+  }
+}

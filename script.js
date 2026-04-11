@@ -30,6 +30,7 @@ let bgFramePairs = [];
 let tsFramePairs = [];
 let airmassFramePairs = [];
 let turbFramePairs = [];
+let frameManifest = null;
 
 // DOM elements
 let frameSlider, leftImage, rightImage;
@@ -54,6 +55,34 @@ function extractBgHourFromFilename(filename) {
     const hourMatch = filename.match(/_(\d{2,3})\.[^.]+$/i);
     if (!hourMatch) return null;
     return parseInt(hourMatch[1], 10);
+}
+
+async function loadFrameManifest(forceRefresh = false) {
+    if (forceRefresh || frameManifest === null) {
+        const manifestUrl = forceRefresh
+            ? `images/manifest.json?t=${Date.now()}`
+            : 'images/manifest.json';
+
+        const response = await fetch(manifestUrl, { cache: 'no-store' });
+        if (!response.ok) {
+            throw new Error(`Unable to read frame manifest: ${response.status}`);
+        }
+
+        frameManifest = await response.json();
+    }
+
+    return frameManifest;
+}
+
+async function discoverManifestFramePairs(category, forceRefresh = false) {
+    try {
+        const manifest = await loadFrameManifest(forceRefresh);
+        const framePairs = manifest?.categories?.[category];
+        return Array.isArray(framePairs) && framePairs.length > 0 ? framePairs : null;
+    } catch (error) {
+        console.warn(`Could not load frame manifest for ${category}; falling back to directory discovery.`, error);
+        return null;
+    }
 }
 
 async function discoverBgFramesForDirectory(directoryPath) {
@@ -118,46 +147,50 @@ async function discoverFramePairs(leftDirectory, rightDirectory, errorMessage) {
     return buildFramePairs(leftFrames, rightFrames, errorMessage);
 }
 
-async function discoverBgFrames() {
-    return discoverFramePairs('images/BG/US', 'images/BG/ICON', 'No overlapping BG US/ICON frame hours found');
+async function discoverBgFrames(forceRefresh = false) {
+    const manifestFrames = await discoverManifestFramePairs('BG', forceRefresh);
+    return manifestFrames || discoverFramePairs('images/BG/US', 'images/BG/ICON', 'No overlapping BG US/ICON frame hours found');
 }
 
-async function discoverTsFrames() {
-    return discoverFramePairs('images/TS/Flash density', 'images/TS/Severe storm potential', 'No overlapping TS flash/severe frame hours found');
+async function discoverTsFrames(forceRefresh = false) {
+    const manifestFrames = await discoverManifestFramePairs('TS', forceRefresh);
+    return manifestFrames || discoverFramePairs('images/TS/Flash density', 'images/TS/Severe storm potential', 'No overlapping TS flash/severe frame hours found');
 }
 
 async function ensureBgFramesLoaded(forceRefresh = false) {
     if (forceRefresh || bgFramePairs.length === 0) {
-        bgFramePairs = await discoverBgFrames();
+        bgFramePairs = await discoverBgFrames(forceRefresh);
     }
     return bgFramePairs;
 }
 
 async function ensureTsFramesLoaded(forceRefresh = false) {
     if (forceRefresh || tsFramePairs.length === 0) {
-        tsFramePairs = await discoverTsFrames();
+        tsFramePairs = await discoverTsFrames(forceRefresh);
     }
     return tsFramePairs;
 }
 
-async function discoverAirmassFrames() {
-    return discoverFramePairs('images/Airmass/FZL', 'images/Airmass/Snow level', 'No overlapping Airmass FZL/Snow frame hours found');
+async function discoverAirmassFrames(forceRefresh = false) {
+    const manifestFrames = await discoverManifestFramePairs('Airmass', forceRefresh);
+    return manifestFrames || discoverFramePairs('images/Airmass/FZL', 'images/Airmass/Snow level', 'No overlapping Airmass FZL/Snow frame hours found');
 }
 
 async function ensureAirmassFramesLoaded(forceRefresh = false) {
     if (forceRefresh || airmassFramePairs.length === 0) {
-        airmassFramePairs = await discoverAirmassFrames();
+        airmassFramePairs = await discoverAirmassFrames(forceRefresh);
     }
     return airmassFramePairs;
 }
 
-async function discoverTurbFrames() {
-    return discoverFramePairs('images/Turb/MTW', 'images/Turb/Wind', 'No overlapping Turb MTW/Wind frame hours found');
+async function discoverTurbFrames(forceRefresh = false) {
+    const manifestFrames = await discoverManifestFramePairs('Turb', forceRefresh);
+    return manifestFrames || discoverFramePairs('images/Turb/MTW', 'images/Turb/Wind', 'No overlapping Turb MTW/Wind frame hours found');
 }
 
 async function ensureTurbFramesLoaded(forceRefresh = false) {
     if (forceRefresh || turbFramePairs.length === 0) {
-        turbFramePairs = await discoverTurbFrames();
+        turbFramePairs = await discoverTurbFrames(forceRefresh);
     }
     return turbFramePairs;
 }

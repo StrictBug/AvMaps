@@ -3,6 +3,7 @@ from matplotlib.colors import BoundaryNorm, ListedColormap
 import argparse
 import bz2
 import cfgrib
+import json
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from cartopy.io.shapereader import Reader, natural_earth
@@ -143,6 +144,87 @@ def count_image_files(directory):
         if os.path.isfile(os.path.join(directory, entry))
         and entry.lower().endswith(REMOVABLE_IMAGE_EXTS)
     )
+
+
+def extract_forecast_hour_from_filename(filename):
+    match = re.search(r'_(\d{2,3})\.[^.]+$', filename)
+    return int(match.group(1)) if match else None
+
+
+def list_published_frames(relative_dir, base_dir):
+    directory = os.path.join(base_dir, relative_dir)
+    if not os.path.isdir(directory):
+        return []
+
+    frames = []
+    normalized_dir = relative_dir.replace(os.sep, '/')
+    for entry in sorted(os.listdir(directory)):
+        file_path = os.path.join(directory, entry)
+        if not os.path.isfile(file_path) or not entry.lower().endswith(REMOVABLE_IMAGE_EXTS):
+            continue
+
+        hour = extract_forecast_hour_from_filename(entry)
+        if hour is None:
+            continue
+
+        frames.append({
+            'hour': hour,
+            'path': f'{normalized_dir}/{entry}',
+        })
+
+    return sorted(frames, key=lambda frame: frame['hour'])
+
+
+def pair_published_frames(left_frames, right_frames):
+    left_by_hour = {frame['hour']: frame['path'] for frame in left_frames}
+    right_by_hour = {frame['hour']: frame['path'] for frame in right_frames}
+
+    return [
+        {
+            'hour': hour,
+            'leftPath': left_by_hour[hour],
+            'rightPath': right_by_hour[hour],
+        }
+        for hour in sorted(set(left_by_hour) & set(right_by_hour))
+    ]
+
+
+def write_frame_manifest(base_dir=None):
+    if base_dir is None:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+
+    images_dir = os.path.join(base_dir, 'images')
+    os.makedirs(images_dir, exist_ok=True)
+
+    manifest = {
+        'generatedAt': datetime.now(timezone.utc).isoformat(),
+        'categories': {
+            'BG': pair_published_frames(
+                list_published_frames(os.path.join('images', 'BG', 'US'), base_dir),
+                list_published_frames(os.path.join('images', 'BG', 'ICON'), base_dir),
+            ),
+            'TS': pair_published_frames(
+                list_published_frames(os.path.join('images', 'TS', 'Flash density'), base_dir),
+                list_published_frames(os.path.join('images', 'TS', 'Severe storm potential'), base_dir),
+            ),
+            'Airmass': pair_published_frames(
+                list_published_frames(os.path.join('images', 'Airmass', 'FZL'), base_dir),
+                list_published_frames(os.path.join('images', 'Airmass', 'Snow level'), base_dir),
+            ),
+            'Turb': pair_published_frames(
+                list_published_frames(os.path.join('images', 'Turb', 'MTW'), base_dir),
+                list_published_frames(os.path.join('images', 'Turb', 'Wind'), base_dir),
+            ),
+        },
+    }
+
+    manifest_path = os.path.join(images_dir, 'manifest.json')
+    with open(manifest_path, 'w', encoding='utf-8') as manifest_file:
+        json.dump(manifest, manifest_file, indent=2)
+        manifest_file.write('\n')
+
+    print(f'Wrote frame manifest to {manifest_path}')
+    return manifest_path
 
 
 def swap_directory_into_place(source_dir, destination_dir):
@@ -2276,7 +2358,7 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
     
     return fig
 
-def generate_gfs_bg_frames(forecast_hours, output_dir='images/BG/US', latest_dataset=None, init_time=None):
+def generate_gfs_bg_frames(forecast_hours, output_dir='images/BG/US', latest_dataset=None, init_time=None, update_manifest=True):
     os.makedirs(output_dir, exist_ok=True)
     if latest_dataset is None or init_time is None:
         latest_dataset, init_time = get_latest_gfs_dataset()
@@ -2306,9 +2388,11 @@ def generate_gfs_bg_frames(forecast_hours, output_dir='images/BG/US', latest_dat
 
         print(f'\nFinished building {len(generated_files)} frames. Publishing to {output_dir}...')
         publish_generated_frames(output_dir, generated_files, temp_dir)
+        if update_manifest:
+            write_frame_manifest()
 
 
-def generate_gfs_ts_flash_frames(forecast_hours, output_dir='images/TS/Flash density', latest_dataset=None, init_time=None):
+def generate_gfs_ts_flash_frames(forecast_hours, output_dir='images/TS/Flash density', latest_dataset=None, init_time=None, update_manifest=True):
     os.makedirs(output_dir, exist_ok=True)
     if latest_dataset is None or init_time is None:
         latest_dataset, init_time = get_latest_gfs_dataset()
@@ -2345,9 +2429,11 @@ def generate_gfs_ts_flash_frames(forecast_hours, output_dir='images/TS/Flash den
 
         print(f'\nFinished building {len(generated_files)} TS flash-density frames. Publishing to {output_dir}...')
         publish_generated_frames(output_dir, generated_files, temp_dir)
+        if update_manifest:
+            write_frame_manifest()
 
 
-def generate_gfs_ts_severe_frames(forecast_hours, output_dir='images/TS/Severe storm potential', latest_dataset=None, init_time=None):
+def generate_gfs_ts_severe_frames(forecast_hours, output_dir='images/TS/Severe storm potential', latest_dataset=None, init_time=None, update_manifest=True):
     os.makedirs(output_dir, exist_ok=True)
     if latest_dataset is None or init_time is None:
         latest_dataset, init_time = get_latest_gfs_dataset()
@@ -2384,9 +2470,11 @@ def generate_gfs_ts_severe_frames(forecast_hours, output_dir='images/TS/Severe s
 
         print(f'\nFinished building {len(generated_files)} TS severe-potential frames. Publishing to {output_dir}...')
         publish_generated_frames(output_dir, generated_files, temp_dir)
+        if update_manifest:
+            write_frame_manifest()
 
 
-def generate_gfs_airmass_fzl_frames(forecast_hours, output_dir='images/Airmass/FZL', latest_dataset=None, init_time=None):
+def generate_gfs_airmass_fzl_frames(forecast_hours, output_dir='images/Airmass/FZL', latest_dataset=None, init_time=None, update_manifest=True):
     os.makedirs(output_dir, exist_ok=True)
     if latest_dataset is None or init_time is None:
         latest_dataset, init_time = get_latest_gfs_dataset()
@@ -2424,9 +2512,11 @@ def generate_gfs_airmass_fzl_frames(forecast_hours, output_dir='images/Airmass/F
 
         print(f'\nFinished building {len(generated_files)} Airmass/FZL frames. Publishing to {output_dir}...')
         publish_generated_frames(output_dir, generated_files, temp_dir)
+        if update_manifest:
+            write_frame_manifest()
 
 
-def generate_gfs_airmass_snow_frames(forecast_hours, output_dir='images/Airmass/Snow level', latest_dataset=None, init_time=None):
+def generate_gfs_airmass_snow_frames(forecast_hours, output_dir='images/Airmass/Snow level', latest_dataset=None, init_time=None, update_manifest=True):
     os.makedirs(output_dir, exist_ok=True)
     if latest_dataset is None or init_time is None:
         latest_dataset, init_time = get_latest_gfs_dataset()
@@ -2458,6 +2548,8 @@ def generate_gfs_airmass_snow_frames(forecast_hours, output_dir='images/Airmass/
 
         print(f'\nFinished building {len(generated_files)} Airmass/Snow level frames. Publishing to {output_dir}...')
         publish_generated_frames(output_dir, generated_files, temp_dir)
+        if update_manifest:
+            write_frame_manifest()
 
 
 def _generate_gfs_turb_frames_internal(
@@ -2468,6 +2560,7 @@ def _generate_gfs_turb_frames_internal(
     wind_output_dir='images/Turb/Wind',
     latest_dataset=None,
     init_time=None,
+    update_manifest=True,
 ):
     if not include_mtw and not include_wind:
         print('No turbulence outputs requested; nothing to do.')
@@ -2532,8 +2625,11 @@ def _generate_gfs_turb_frames_internal(
             print(f'Finished building {len(wind_generated_files)} Turb/Wind frames. Publishing to {wind_output_dir}...')
             publish_generated_frames(wind_output_dir, wind_generated_files, wind_temp_dir)
 
+        if update_manifest:
+            write_frame_manifest()
 
-def generate_gfs_turb_mtw_frames(forecast_hours, output_dir='images/Turb/MTW', latest_dataset=None, init_time=None):
+
+def generate_gfs_turb_mtw_frames(forecast_hours, output_dir='images/Turb/MTW', latest_dataset=None, init_time=None, update_manifest=True):
     _generate_gfs_turb_frames_internal(
         forecast_hours,
         include_mtw=True,
@@ -2541,10 +2637,11 @@ def generate_gfs_turb_mtw_frames(forecast_hours, output_dir='images/Turb/MTW', l
         mtw_output_dir=output_dir,
         latest_dataset=latest_dataset,
         init_time=init_time,
+        update_manifest=update_manifest,
     )
 
 
-def generate_gfs_turb_wind_frames(forecast_hours, output_dir='images/Turb/Wind', latest_dataset=None, init_time=None):
+def generate_gfs_turb_wind_frames(forecast_hours, output_dir='images/Turb/Wind', latest_dataset=None, init_time=None, update_manifest=True):
     _generate_gfs_turb_frames_internal(
         forecast_hours,
         include_mtw=False,
@@ -2552,6 +2649,7 @@ def generate_gfs_turb_wind_frames(forecast_hours, output_dir='images/Turb/Wind',
         wind_output_dir=output_dir,
         latest_dataset=latest_dataset,
         init_time=init_time,
+        update_manifest=update_manifest,
     )
 
 
@@ -2561,6 +2659,7 @@ def generate_gfs_turb_frames(
     wind_output_dir='images/Turb/Wind',
     latest_dataset=None,
     init_time=None,
+    update_manifest=True,
 ):
     _generate_gfs_turb_frames_internal(
         forecast_hours,
@@ -2570,10 +2669,11 @@ def generate_gfs_turb_frames(
         wind_output_dir=wind_output_dir,
         latest_dataset=latest_dataset,
         init_time=init_time,
+        update_manifest=update_manifest,
     )
 
 
-def generate_icon_bg_frames(forecast_hours, preferred_run_time=None, output_dir='images/BG/ICON', icon_run=None, remap_state=None):
+def generate_icon_bg_frames(forecast_hours, preferred_run_time=None, output_dir='images/BG/ICON', icon_run=None, remap_state=None, update_manifest=True):
     os.makedirs(output_dir, exist_ok=True)
 
     if icon_run is None:
@@ -2614,6 +2714,8 @@ def generate_icon_bg_frames(forecast_hours, preferred_run_time=None, output_dir=
 
         print(f'\nFinished building {len(generated_files)} ICON frames. Publishing to {output_dir}...')
         publish_generated_frames(output_dir, generated_files, temp_dir)
+        if update_manifest:
+            write_frame_manifest()
 
 
 def generate_all_layers_atomically(forecast_hours, model='both'):
@@ -2646,6 +2748,7 @@ def generate_all_layers_atomically(forecast_hours, model='both'):
                 output_dir=stage_path('images', 'TS', 'Flash density'),
                 latest_dataset=gfs_latest_dataset,
                 init_time=gfs_init_time,
+                update_manifest=False,
             )
             staged_targets.append(os.path.join('images', 'TS', 'Flash density'))
 
@@ -2654,6 +2757,7 @@ def generate_all_layers_atomically(forecast_hours, model='both'):
                 output_dir=stage_path('images', 'TS', 'Severe storm potential'),
                 latest_dataset=gfs_latest_dataset,
                 init_time=gfs_init_time,
+                update_manifest=False,
             )
             staged_targets.append(os.path.join('images', 'TS', 'Severe storm potential'))
 
@@ -2662,6 +2766,7 @@ def generate_all_layers_atomically(forecast_hours, model='both'):
                 output_dir=stage_path('images', 'Airmass', 'FZL'),
                 latest_dataset=gfs_latest_dataset,
                 init_time=gfs_init_time,
+                update_manifest=False,
             )
             staged_targets.append(os.path.join('images', 'Airmass', 'FZL'))
 
@@ -2670,6 +2775,7 @@ def generate_all_layers_atomically(forecast_hours, model='both'):
                 output_dir=stage_path('images', 'Airmass', 'Snow level'),
                 latest_dataset=gfs_latest_dataset,
                 init_time=gfs_init_time,
+                update_manifest=False,
             )
             staged_targets.append(os.path.join('images', 'Airmass', 'Snow level'))
 
@@ -2679,6 +2785,7 @@ def generate_all_layers_atomically(forecast_hours, model='both'):
                 wind_output_dir=stage_path('images', 'Turb', 'Wind'),
                 latest_dataset=gfs_latest_dataset,
                 init_time=gfs_init_time,
+                update_manifest=False,
             )
             staged_targets.extend([
                 os.path.join('images', 'Turb', 'MTW'),
@@ -2692,6 +2799,7 @@ def generate_all_layers_atomically(forecast_hours, model='both'):
                 output_dir=stage_path('images', 'BG', 'ICON'),
                 icon_run=icon_run,
                 remap_state=icon_remap_state,
+                update_manifest=False,
             )
             staged_targets.append(os.path.join('images', 'BG', 'ICON'))
 
@@ -2701,10 +2809,12 @@ def generate_all_layers_atomically(forecast_hours, model='both'):
                 output_dir=stage_path('images', 'BG', 'US'),
                 latest_dataset=gfs_latest_dataset,
                 init_time=gfs_init_time,
+                update_manifest=False,
             )
             staged_targets.append(os.path.join('images', 'BG', 'US'))
 
         publish_staged_directories_atomically(staging_root, staged_targets)
+        write_frame_manifest(script_dir)
         print(f'Atomic publish complete. Updated {len(staged_targets)} directories under {script_dir}/images')
 
 
