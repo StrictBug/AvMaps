@@ -13,8 +13,8 @@ const imageConfig = {
         right: { folder: 'Severe storm potential', title: 'Severe Storm Potential', prefix: '' }
     },
     'Turb': {
-        left: { folder: 'MTW', title: 'MTW', prefix: 'TURBMTW' },
-        right: { folder: 'Wind', title: 'Wind', prefix: 'TURBWIND' }
+        left: { folder: 'MTW', title: 'MTW', prefix: '' },
+        right: { folder: 'Wind', title: 'Wind', prefix: '' }
     }
 };
 
@@ -29,6 +29,7 @@ let animationSpeed = 500; // milliseconds
 let bgFramePairs = [];
 let tsFramePairs = [];
 let airmassFramePairs = [];
+let turbFramePairs = [];
 
 // DOM elements
 let frameSlider, leftImage, rightImage;
@@ -180,6 +181,37 @@ async function ensureAirmassFramesLoaded(forceRefresh = false) {
     return airmassFramePairs;
 }
 
+async function discoverTurbFrames() {
+    const mtwFrames = await discoverBgFramesForDirectory('images/Turb/MTW');
+    const windFrames = await discoverBgFramesForDirectory('images/Turb/Wind');
+
+    const mtwByHour = new Map(mtwFrames.map(frame => [frame.hour, frame.path]));
+    const windByHour = new Map(windFrames.map(frame => [frame.hour, frame.path]));
+
+    const commonHours = Array.from(mtwByHour.keys())
+        .filter(hour => windByHour.has(hour))
+        .sort((a, b) => a - b);
+
+    const framePairs = commonHours.map(hour => ({
+        hour,
+        leftPath: mtwByHour.get(hour),
+        rightPath: windByHour.get(hour)
+    }));
+
+    if (framePairs.length === 0) {
+        throw new Error('No overlapping Turb MTW/Wind frame hours found');
+    }
+
+    return framePairs;
+}
+
+async function ensureTurbFramesLoaded(forceRefresh = false) {
+    if (forceRefresh || turbFramePairs.length === 0) {
+        turbFramePairs = await discoverTurbFrames();
+    }
+    return turbFramePairs;
+}
+
 function setMaxFramesForCategory(category) {
     if (category === 'BG' && bgFramePairs.length > 0) {
         maxFrames = bgFramePairs.length;
@@ -187,6 +219,8 @@ function setMaxFramesForCategory(category) {
         maxFrames = tsFramePairs.length;
     } else if (category === 'Airmass' && airmassFramePairs.length > 0) {
         maxFrames = airmassFramePairs.length;
+    } else if (category === 'Turb' && turbFramePairs.length > 0) {
+        maxFrames = turbFramePairs.length;
     } else {
         maxFrames = DEFAULT_MAX_FRAMES;
     }
@@ -366,6 +400,13 @@ async function loadCategory(category) {
             console.warn('Could not dynamically discover Airmass FZL/Snow files, using existing frame count.', error);
             airmassFramePairs = [];
         }
+    } else if (category === 'Turb') {
+        try {
+            await ensureTurbFramesLoaded(true);
+        } catch (error) {
+            console.warn('Could not dynamically discover Turb MTW/Wind files, using existing frame count.', error);
+            turbFramePairs = [];
+        }
     }
     
     setMaxFramesForCategory(category);
@@ -436,6 +477,26 @@ function updateImages() {
 
         leftImage.alt = `FZL - Hour ${frameHour}`;
         rightImage.alt = `Snow Level - Hour ${frameHour}`;
+        return;
+    }
+
+    if (currentCategory === 'Turb') {
+        if (turbFramePairs.length === 0) {
+            console.warn('No Turb frame pairs available to display.');
+            return;
+        }
+
+        const framePair = turbFramePairs[currentFrame - 1];
+        const frameHour = framePair.hour;
+
+        leftImage.classList.remove('error');
+        rightImage.classList.remove('error');
+
+        leftImage.src = framePair.leftPath;
+        rightImage.src = framePair.rightPath;
+
+        leftImage.alt = `MTW - Hour ${frameHour}`;
+        rightImage.alt = `Wind - Hour ${frameHour}`;
         return;
     }
     
@@ -523,6 +584,17 @@ function preloadImages(category) {
         });
         return;
     }
+
+    if (category === 'Turb') {
+        turbFramePairs.forEach(framePair => {
+            const leftImg = new Image();
+            leftImg.src = framePair.leftPath;
+
+            const rightImg = new Image();
+            rightImg.src = framePair.rightPath;
+        });
+        return;
+    }
     
     for (let i = 1; i <= DEFAULT_MAX_FRAMES; i++) {
         const frameNumber = i.toString().padStart(3, '0');
@@ -558,6 +630,12 @@ window.addEventListener('load', async function() {
         await ensureAirmassFramesLoaded();
     } catch (error) {
         console.warn('Could not preload Airmass frames dynamically:', error);
+    }
+
+    try {
+        await ensureTurbFramesLoaded();
+    } catch (error) {
+        console.warn('Could not preload Turb frames dynamically:', error);
     }
 
     // Preload images for all categories
