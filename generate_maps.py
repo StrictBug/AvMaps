@@ -46,6 +46,13 @@ GAF_FEATURE_CACHE = None
 LAND_PREP_CACHE = None
 OCEAN_MASK_CACHE = {}
 
+# Empirical snow level regression (derived from user-provided calibration points):
+# SL_m = b0 + b1*T850_C + b2*H850_m + b3*Thickness_m
+SNOW_LEVEL_B0 = -16930.19336594584
+SNOW_LEVEL_B1_T850 = 71.92961793293026
+SNOW_LEVEL_B2_H850 = 0.5617611362518282
+SNOW_LEVEL_B3_THICKNESS = 3.218874975055911
+
 
 def safe_remove_file(path):
     try:
@@ -454,14 +461,13 @@ def calculate_wet_bulb_freezing_level_height_ft(data):
 
 
 def calculate_snow_precipitation_1h(data):
-    """Calculate 1-hour precipitation where snow level (WBFL) is less than 600m above terrain.
+    """Calculate 1-hour precipitation where estimated snow level is less than 600m above terrain.
     
     Returns 1-hour total precipitation (mm) masked to grid points where
-    WBFL is lower than 600m above the terrain elevation.
+    estimated snow level is lower than 600m above the terrain elevation.
     """
-    # Get WBFL in meters (convert from feet)
-    wbfl_ft = calculate_wet_bulb_freezing_level_height_ft(data)
-    wbfl_m = wbfl_ft / 3.28084
+    # Get estimated snow level in meters from calibrated regression.
+    snow_level_m = calculate_estimated_snow_level_m(data)
     
     # Get terrain height in meters (convert from geopotential)
     hgt_surface = get_time_index(data['Geopotential_height_surface'])
@@ -475,8 +481,8 @@ def calculate_snow_precipitation_1h(data):
         print('Warning: 1-hour precipitation field not available; snow precipitation layer skipped.')
         return None
     
-    # Mask precipitation to only where WBFL < 600m above terrain (snow will precipitate)
-    snow_precip = np.where((wbfl_m < (terrain_m + 600)) & np.isfinite(precip_1h), precip_1h, np.nan)
+    # Mask precipitation to only where snow level < 600m above terrain (snow will precipitate).
+    snow_precip = np.where((snow_level_m < (terrain_m + 600)) & np.isfinite(precip_1h), precip_1h, np.nan)
     
     return snow_precip
 
@@ -499,6 +505,23 @@ def calculate_icing_relative_humidity(data):
     valid = rh_count > 0
     mean_rh[valid] = rh_sum[valid] / rh_count[valid]
     return mean_rh
+
+
+def calculate_estimated_snow_level_m(data):
+    """Return estimated snow level height (m AMSL) from T850/H850/thickness regression."""
+    t850_c = get_isobaric_field(data['Temperature_isobaric'], 85000).values - 273.15
+    h850_m = get_isobaric_field(data['Geopotential_height_isobaric'], 85000).values
+    h1000_m = get_isobaric_field(data['Geopotential_height_isobaric'], 100000).values
+    h500_m = get_isobaric_field(data['Geopotential_height_isobaric'], 50000).values
+    thickness_m = h500_m - h1000_m
+
+    snow_level_m = (
+        SNOW_LEVEL_B0
+        + (SNOW_LEVEL_B1_T850 * t850_c)
+        + (SNOW_LEVEL_B2_H850 * h850_m)
+        + (SNOW_LEVEL_B3_THICKNESS * thickness_m)
+    )
+    return np.where(snow_level_m >= 0.0, snow_level_m, np.nan)
 
 
 def get_max_geometric_vertical_velocity(data, pressure_levels_pa):
@@ -1649,17 +1672,18 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         freezing_level_ft = calculate_freezing_level_height_ft(data)
         freezing_level_ft = np.where(freezing_level_ft >= 0, freezing_level_ft, np.nan)
 
-        fzl_levels = [0, 2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000, 18000]
+        fzl_levels = [0, 2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000, 18000, 20000]
         fzl_colors = [
-            '#2c1a8a',
-            '#1f5bd8',
-            '#00a6ff',
-            '#3ccf9b',
-            '#9fd356',
-            '#e7d84b',
-            '#f4b247',
-            '#ef7e3b',
-            '#d6452f',
+            '#99509f',
+            '#36c6f4',
+            '#6fccdd',
+            '#69bd45',
+            '#cbdb2a',
+            '#f6eb14',
+            '#fbce08',
+            '#f8981d',
+            '#ed2024',
+            '#ed2891',
         ]
         fzl_cmap = ListedColormap(fzl_colors)
         fzl_norm = BoundaryNorm(fzl_levels, fzl_cmap.N, clip=False)
@@ -1694,11 +1718,13 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         hatch_overlay.set_facecolors([(0.0, 0.0, 0.0, 0.0)])
         hatch_overlay.set_edgecolors([(0.0, 0.0, 0.0, 0.5)])
 
+        # Draw freezing-level isolines every 500 ft.
+        fzl_contour_levels = np.arange(500, 18000, 500)
         cs_fzl = ax.contour(
             data.longitude,
             data.latitude,
             freezing_level_ft,
-            levels=fzl_levels[1:-1],
+            levels=fzl_contour_levels,
             cmap=fzl_cmap,
             linewidths=1.0,
             alpha=0.5,
@@ -1709,16 +1735,14 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         for label in fzl_labels:
             label.set_zorder(50.1)
 
-        # Icing layer: mean RH between 0C and -15C, shown only above 90%.
+        # Icing layer: mean RH between 0C and -15C, using provided XML color bins.
         icing_rh = calculate_icing_relative_humidity(data)
-        icing_masked = np.where(icing_rh >= 90.0, icing_rh, np.nan)
-        icing_levels = [90, 92, 94, 96, 98, 100]
+        icing_masked = np.where(icing_rh >= 95.0, icing_rh, np.nan)
+        icing_levels = [0, 95, 97.5, 100]
         icing_colors = [
-            '#dff4ff',
-            '#bfe8ff',
-            '#8fd8ff',
-            '#58c1f5',
-            '#249ddc',
+            (1.0, 1.0, 1.0, 0.0),
+            (0.0, 204.0 / 255.0, 1.0, 1.0),
+            (0.0, 1.0, 1.0, 1.0),
         ]
         icing_cmap = ListedColormap(icing_colors)
         icing_norm = BoundaryNorm(icing_levels, icing_cmap.N, clip=True)
@@ -1763,20 +1787,17 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             zorder=5.9,
         )
 
-        # Thermals layer: PBL height (ft) masked where 2m temp <= 30°C
+        # Thermals layer: PBL height (ft) masked where 2m temp <= 30C, with XML palette.
         if 'Planetary_boundary_layer_height_surface' in data:
             temp_2m_raw = get_time_index(data['Temperature_height_above_ground'].sel(height_above_ground3=2)) - 273.15
             pblh_ft = get_time_index(data['Planetary_boundary_layer_height_surface']) * 3.28084
             thermals_ft = np.where(temp_2m_raw.values > 30.0, pblh_ft.values, np.nan)
 
-            thermal_levels = [0, 2000, 4000, 6000, 8000, 10000, 12000]
+            thermal_levels = [0, 6000, 10000, 20000]
             thermal_colors = [
-                '#ffffcc',
-                '#ffeda0',
-                '#fed976',
-                '#feb24c',
-                '#fd8d3c',
-                '#e31a1c',
+                (1.0, 1.0, 1.0, 0.0),
+                '#ffcc00',
+                '#ff6600',
             ]
             thermal_cmap = ListedColormap(thermal_colors)
             thermal_norm = BoundaryNorm(thermal_levels, thermal_cmap.N, clip=False)
@@ -1859,37 +1880,45 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             print('Warning: Convective precipitation field not available; cold pool hail layer skipped.')
 
     if airmass_snow_profile:
-        wbfl_ft = calculate_wet_bulb_freezing_level_height_ft(data)
-        wbfl_ft = np.where(wbfl_ft >= 0, wbfl_ft, np.nan)
+        snow_level_m = calculate_estimated_snow_level_m(data)
+        snow_level_ft = snow_level_m * 3.28084
 
-        wbfl_levels = [0, 1000, 2000, 3000, 4000, 5000, 6000, 8000, 10000, 12000, 14000, 16000]
-        wbfl_colors = [
-            '#003f5c',
-            '#2f4b7c',
-            '#365c8d',
-            '#3f6f9e',
-            '#4b82ad',
-            '#5a95b9',
-            '#6da8c2',
-            '#84bbca',
-            '#9dced1',
-            '#b9e0d7',
-            '#d7f1de',
+        # Snow level isolines every 500 ft, colored by provided XIBL threshold bins.
+        snow_level_contour_levels_ft = np.arange(0, 20000 + 500, 500)
+        snow_level_bin_edges_ft = [0, 2500, 4000, 5000, 6500, 8000, 9800, 20000]
+        snow_level_bin_colors = [
+            '#c80000',  # 0-2500
+            '#ff0000',  # 2500-4000
+            '#ff5555',  # 4000-5000
+            '#0000ff',  # 5000-6500
+            '#0064ff',  # 6500-8000
+            '#00c800',  # 8000-9800
+            '#000000',  # 9800-20000
         ]
 
-        wbfl_line_cmap = ListedColormap(wbfl_colors)
-        cs_wbfl = ax.contour(
+        snow_level_line_colors = []
+        for level_ft in snow_level_contour_levels_ft:
+            color_idx = len(snow_level_bin_colors) - 1
+            for edge_idx in range(len(snow_level_bin_edges_ft) - 1):
+                lower = snow_level_bin_edges_ft[edge_idx]
+                upper = snow_level_bin_edges_ft[edge_idx + 1]
+                if lower <= level_ft < upper:
+                    color_idx = edge_idx
+                    break
+            snow_level_line_colors.append(snow_level_bin_colors[color_idx])
+
+        cs_snow_level = ax.contour(
             data.longitude,
             data.latitude,
-            wbfl_ft,
-            levels=wbfl_levels,
-            cmap=wbfl_line_cmap,
+            snow_level_ft,
+            levels=snow_level_contour_levels_ft,
+            colors=snow_level_line_colors,
             linewidths=1.2,
             alpha=0.95,
             transform=ccrs.PlateCarree(),
             zorder=6.6,
         )
-        ax.clabel(cs_wbfl, inline=True, fontsize=7, fmt='%d ft')
+        ax.clabel(cs_snow_level, inline=True, fontsize=7, fmt='%d ft')
         
         # Plot 1-hour snow precipitation where WBFL < terrain height
         snow_precip = calculate_snow_precipitation_1h(data)
