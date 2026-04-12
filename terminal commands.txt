@@ -18,7 +18,7 @@ Updating main repo
 cd /workspaces/AvMaps
 git status
 git add -A
-git commit -m "Describe your changes here"
+git commit -m "Tweaks"
 git push origin main
 
 update time

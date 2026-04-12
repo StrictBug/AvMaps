@@ -1907,6 +1907,21 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
                     break
             snow_level_line_colors.append(snow_level_bin_colors[color_idx])
 
+        snow_level_fill_cmap = ListedColormap(snow_level_bin_colors)
+        snow_level_fill_norm = BoundaryNorm(snow_level_bin_edges_ft, snow_level_fill_cmap.N, clip=False)
+        ax.contourf(
+            data.longitude,
+            data.latitude,
+            snow_level_ft,
+            levels=snow_level_bin_edges_ft,
+            cmap=snow_level_fill_cmap,
+            norm=snow_level_fill_norm,
+            alpha=0.02,
+            extend='max',
+            transform=ccrs.PlateCarree(),
+            zorder=6.5,
+        )
+
         cs_snow_level = ax.contour(
             data.longitude,
             data.latitude,
@@ -1914,7 +1929,7 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             levels=snow_level_contour_levels_ft,
             colors=snow_level_line_colors,
             linewidths=1.2,
-            alpha=0.95,
+            alpha=0.3,
             transform=ccrs.PlateCarree(),
             zorder=6.6,
         )
@@ -1947,7 +1962,7 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
                 cmap=snow_cmap,
                 alpha=0.82,
                 transform=ccrs.PlateCarree(),
-                zorder=6.8,
+                zorder=7.0,
             )
             
             # Add contour lines for visibility
@@ -1960,7 +1975,7 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
                 linewidths=0.5,
                 alpha=0.6,
                 transform=ccrs.PlateCarree(),
-                zorder=6.85,
+                zorder=7.05,
             )
     
     # Calculate 10 m surface wind once for both fog logic and wind barbs
