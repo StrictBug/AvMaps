@@ -1313,12 +1313,12 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         z_coast = 9
         z_borders = 9
         z_gaf = 9
-        z_mslp = 6
-        z_thickness = 7
-        z_low_cloud = 2
+        z_mslp = 2
         z_fog = 3
-        z_drizzle = 4
-        z_bg_precip = 5
+        z_low_cloud = 4
+        z_drizzle = 5
+        z_bg_precip = 6
+        z_thickness = 7
         z_bg_barbs = 8
         z_taf_points = 10
         z_taf_text = 11
@@ -1634,7 +1634,7 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             levels=cloud_levels,
             cmap=cloud_cmap,
             norm=cloud_norm,
-            alpha=0.7,
+            alpha=0.6,
             extend='max',
             transform=ccrs.PlateCarree(),
             zorder=z_low_cloud)
@@ -1663,7 +1663,7 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             levels=drizzle_levels,
             cmap=drizzle_cmap,
             norm=drizzle_norm,
-            alpha=1.0,
+            alpha=0.6,
             extend='max',
             transform=ccrs.PlateCarree(),
             zorder=z_drizzle)
@@ -2106,7 +2106,7 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             levels=fog_levels,
             cmap=fog_cmap,
             norm=fog_norm,
-            alpha=1.0,
+            alpha=0.6,
             transform=ccrs.PlateCarree(),
             zorder=z_fog)
 
@@ -2262,7 +2262,7 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             (200, 0, 0, 255),
             (50, 0, 0, 255),
         ]
-        precip_alpha = 1.0
+        precip_alpha = 0.6
         precip_zorder = z_bg_precip
 
     if precip_masked is not None:
