@@ -20,7 +20,8 @@ const imageConfig = {
 const domainHotkeys = {
     '1': 'AU',
     '2': 'WA_SA',
-    '3': 'VIC_TAS'
+    '3': 'VIC_TAS',
+    '4': 'NSW'
 };
 
 const categoryHotkeys = {
@@ -62,20 +63,23 @@ function ensureDomainCache(domainId) {
 function normalizeFrameManifest(manifest) {
     const normalized = manifest || {};
     const domains = normalized.domains || {};
+    const domainOrder = Array.isArray(normalized.domainOrder) && normalized.domainOrder.length > 0
+        ? normalized.domainOrder
+        : Object.keys(domains);
+
+    const normalizedDomains = {};
+
+    domainOrder.forEach(domainId => {
+        normalizedDomains[domainId] = {
+            ...domains[domainId],
+            categories: domains[domainId]?.categories || {}
+        };
+    });
 
     return {
         ...normalized,
-        domains: {
-            AU: {
-                categories: domains.AU?.categories || {}
-            },
-            WA_SA: {
-                categories: domains.WA_SA?.categories || {}
-            },
-            VIC_TAS: {
-                categories: domains.VIC_TAS?.categories || {}
-            }
-        }
+        domainOrder,
+        domains: normalizedDomains
     };
 }
 

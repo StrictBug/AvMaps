@@ -57,6 +57,10 @@ DOMAIN_DEFINITIONS = {
         'label': 'VIC/TAS',
         'gaf_areas': ('VIC', 'TAS'),
     },
+    'NSW': {
+        'label': 'NSW',
+        'gaf_areas': ('NSW-E', 'NSW-W'),
+    },
 }
 DEFAULT_DOMAIN_IDS = tuple(DOMAIN_DEFINITIONS.keys())
 
@@ -3189,7 +3193,7 @@ def main():
     parser.add_argument('--layer', choices=['bg', 'ts_flash', 'ts_severe', 'airmass_fzl', 'airmass_snow', 'turb', 'turb_mtw', 'turb_wind', 'all'], default='bg')
     parser.add_argument('--start-hour', type=int, default=9)
     parser.add_argument('--end-hour', type=int, default=35)
-    parser.add_argument('--domains', default='all', help='Comma-separated domain ids, or all. Phase 1 ids: AU,WA_SA,VIC_TAS')
+    parser.add_argument('--domains', default='all', help='Comma-separated domain ids, or all. Current ids: AU,WA_SA,VIC_TAS,NSW')
     args = parser.parse_args()
 
     forecast_hours = list(range(args.start_hour, args.end_hour + 1))

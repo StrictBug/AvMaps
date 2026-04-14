@@ -1,17 +1,17 @@
 Updating all maps atomically (recommended)
 cd /workspaces/AvMaps
-python3 generate_maps.py --model both --layer all --domains AU,WA_SA,VIC_TAS --start-hour 9 --end-hour 35
+python3 generate_maps.py --model both --layer all --domains AU,WA_SA,VIC_TAS,NSW --start-hour 9 --end-hour 35
 python3 -m http.server 8000
 
 Testing / updating individual layers
 cd /workspaces/AvMaps
-python3 generate_maps.py --model both --layer bg --domains AU,WA_SA,VIC_TAS --start-hour 9 --end-hour 35
-python3 generate_maps.py --model gfs --layer ts_flash --domains AU,WA_SA,VIC_TAS --start-hour 9 --end-hour 35
-python3 generate_maps.py --model gfs --layer ts_severe --domains AU,WA_SA,VIC_TAS --start-hour 9 --end-hour 35
-python3 generate_maps.py --model gfs --layer airmass_fzl --domains AU,WA_SA,VIC_TAS --start-hour 9 --end-hour 35
-python3 generate_maps.py --model gfs --layer airmass_snow --domains AU,WA_SA,VIC_TAS --start-hour 9 --end-hour 35
-python3 generate_maps.py --model gfs --layer turb_mtw --domains AU,WA_SA,VIC_TAS --start-hour 9 --end-hour 35
-python3 generate_maps.py --model gfs --layer turb_wind --domains AU,WA_SA,VIC_TAS --start-hour 9 --end-hour 35
+python3 generate_maps.py --model both --layer bg --domains AU,WA_SA,VIC_TAS,NSW --start-hour 9 --end-hour 35
+python3 generate_maps.py --model gfs --layer ts_flash --domains AU,WA_SA,VIC_TAS,NSW --start-hour 9 --end-hour 35
+python3 generate_maps.py --model gfs --layer ts_severe --domains AU,WA_SA,VIC_TAS,NSW --start-hour 9 --end-hour 35
+python3 generate_maps.py --model gfs --layer airmass_fzl --domains AU,WA_SA,VIC_TAS,NSW --start-hour 9 --end-hour 35
+python3 generate_maps.py --model gfs --layer airmass_snow --domains AU,WA_SA,VIC_TAS,NSW --start-hour 9 --end-hour 35
+python3 generate_maps.py --model gfs --layer turb_mtw --domains AU,WA_SA,VIC_TAS,NSW --start-hour 9 --end-hour 35
+python3 generate_maps.py --model gfs --layer turb_wind --domains AU,WA_SA,VIC_TAS,NSW --start-hour 9 --end-hour 35
 python3 -m http.server 8000
 
 Updating source code in main repo
