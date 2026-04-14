@@ -74,7 +74,7 @@ jobs:
             FORCE_FLAG="--force"
           fi
 
-          python scripts/auto_update_maps.py --model both --start-hour 9 --end-hour 35 --github-output "$GITHUB_OUTPUT" $FORCE_FLAG
+          python scripts/auto_update_maps.py --model both --start-hour 9 --end-hour 48 --github-output "$GITHUB_OUTPUT" $FORCE_FLAG
 
       - name: Report skipped deploy
         if: steps.generate.outputs.should_deploy != 'true'

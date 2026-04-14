@@ -3192,7 +3192,7 @@ def main():
     parser.add_argument('--model', choices=['gfs', 'icon', 'both'], default='both')
     parser.add_argument('--layer', choices=['bg', 'ts_flash', 'ts_severe', 'airmass_fzl', 'airmass_snow', 'turb', 'turb_mtw', 'turb_wind', 'all'], default='bg')
     parser.add_argument('--start-hour', type=int, default=9)
-    parser.add_argument('--end-hour', type=int, default=35)
+    parser.add_argument('--end-hour', type=int, default=48)
     parser.add_argument('--domains', default='all', help='Comma-separated domain ids, or all. Current ids: AU,WA_SA,VIC_TAS,NSW')
     args = parser.parse_args()
 
