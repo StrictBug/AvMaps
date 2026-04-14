@@ -32,6 +32,41 @@ lat_max = -22.55  # 22°33'S
 lon_min = 103.5667  # 103°34'E
 lon_max = 172.1167  # 172°7'E
 
+# Expand the data ingest domain slightly west of the displayed AU domain so
+# the WA_SA regional view has complete source coverage without changing the
+# visual extent of any domain.
+data_lat_min = lat_min
+data_lat_max = lat_max
+data_lon_min = 101.0
+data_lon_max = lon_max
+
+REFERENCE_DOMAIN_ASPECT_RATIO = (lon_max - lon_min) / (lat_max - lat_min)
+DOMAIN_PADDING_RATIO = 0.08
+MIN_DOMAIN_PADDING_DEGREES = 0.75
+
+DOMAIN_DEFINITIONS = {
+    'AU': {
+        'label': 'Australia',
+        'fixed_extent': (lon_min, lon_max, lat_min, lat_max),
+    },
+    'WA_SA': {
+        'label': 'WA-S/SA',
+        'gaf_areas': ('WA-S', 'SA'),
+    },
+    'VIC_TAS': {
+        'label': 'VIC/TAS',
+        'gaf_areas': ('VIC', 'TAS'),
+    },
+}
+DEFAULT_DOMAIN_IDS = tuple(DOMAIN_DEFINITIONS.keys())
+
+CATEGORY_PANEL_DIRS = {
+    'BG': ('BG/US', 'BG/ICON'),
+    'TS': ('TS/Flash density', 'TS/Severe storm potential'),
+    'Airmass': ('Airmass/FZL', 'Airmass/Snow level'),
+    'Turb': ('Turb/MTW', 'Turb/Wind'),
+}
+
 REMOVABLE_IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
 TAF_LABEL_DX = -0.12
 TAF_LABEL_DY = 0.12
@@ -43,6 +78,8 @@ ICON_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.icon
 
 TAF_LOCATION_ROWS_CACHE = None
 GAF_FEATURE_CACHE = None
+GAF_AREA_GEOMETRY_CACHE = None
+DOMAIN_PROFILE_CACHE = None
 LAND_PREP_CACHE = None
 OCEAN_MASK_CACHE = {}
 
@@ -103,6 +140,135 @@ def get_gaf_feature():
             linewidth=0.7,
         )
     return GAF_FEATURE_CACHE
+
+
+def get_gaf_area_geometries():
+    global GAF_AREA_GEOMETRY_CACHE
+    if GAF_AREA_GEOMETRY_CACHE is None:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        gaf_shp = os.path.join(script_dir, 'geo files', 'GAF_Boundaries.shp')
+        reader = Reader(gaf_shp)
+        GAF_AREA_GEOMETRY_CACHE = {
+            record.attributes['GAF_AREA']: record.geometry
+            for record in reader.records()
+        }
+    return GAF_AREA_GEOMETRY_CACHE
+
+
+def normalize_domain_ids(domain_ids=None):
+    if domain_ids is None or domain_ids == 'all':
+        requested = list(DEFAULT_DOMAIN_IDS)
+    elif isinstance(domain_ids, str):
+        requested = [item.strip() for item in domain_ids.split(',') if item.strip()]
+    else:
+        requested = list(domain_ids)
+
+    normalized = []
+    seen = set()
+    for domain_id in requested:
+        if domain_id not in DOMAIN_DEFINITIONS:
+            raise ValueError(f'Unknown domain id: {domain_id}')
+        if domain_id in seen:
+            continue
+        normalized.append(domain_id)
+        seen.add(domain_id)
+
+    if not normalized:
+        raise ValueError('At least one domain must be requested')
+
+    return normalized
+
+
+def _build_bounds_centered_extent(bounds):
+    min_lon, min_lat, max_lon, max_lat = bounds
+
+    center_lon = (min_lon + max_lon) / 2.0
+    center_lat = (min_lat + max_lat) / 2.0
+
+    lon_padding = max((max_lon - min_lon) * DOMAIN_PADDING_RATIO, MIN_DOMAIN_PADDING_DEGREES)
+    lat_padding = max((max_lat - min_lat) * DOMAIN_PADDING_RATIO, MIN_DOMAIN_PADDING_DEGREES)
+
+    half_lon_span = ((max_lon - min_lon) / 2.0) + lon_padding
+    half_lat_span = ((max_lat - min_lat) / 2.0) + lat_padding
+
+    current_ratio = half_lon_span / max(half_lat_span, 1e-6)
+    if current_ratio < REFERENCE_DOMAIN_ASPECT_RATIO:
+        half_lon_span = half_lat_span * REFERENCE_DOMAIN_ASPECT_RATIO
+    else:
+        half_lat_span = half_lon_span / REFERENCE_DOMAIN_ASPECT_RATIO
+
+    return (
+        center_lon - half_lon_span,
+        center_lon + half_lon_span,
+        center_lat - half_lat_span,
+        center_lat + half_lat_span,
+    )
+
+
+def get_domain_profiles():
+    global DOMAIN_PROFILE_CACHE
+    if DOMAIN_PROFILE_CACHE is not None:
+        return DOMAIN_PROFILE_CACHE
+
+    gaf_geometries = get_gaf_area_geometries()
+    profiles = {}
+
+    for domain_id, config in DOMAIN_DEFINITIONS.items():
+        fixed_extent = config.get('fixed_extent')
+        if fixed_extent is not None:
+            min_lon, max_lon, min_lat, max_lat = fixed_extent
+            centroid_lon = (min_lon + max_lon) / 2.0
+            centroid_lat = (min_lat + max_lat) / 2.0
+            extent = fixed_extent
+        else:
+            missing_areas = [area for area in config['gaf_areas'] if area not in gaf_geometries]
+            if missing_areas:
+                raise RuntimeError(f'Missing GAF areas for {domain_id}: {", ".join(missing_areas)}')
+
+            geometry_union = unary_union([gaf_geometries[area] for area in config['gaf_areas']])
+            centroid_lon = geometry_union.centroid.x
+            centroid_lat = geometry_union.centroid.y
+            extent = _build_bounds_centered_extent(geometry_union.bounds)
+
+        profiles[domain_id] = {
+            'id': domain_id,
+            'label': config['label'],
+            'extent': extent,
+            'centroid': (centroid_lon, centroid_lat),
+            'gaf_areas': tuple(config.get('gaf_areas', ())),
+        }
+
+    DOMAIN_PROFILE_CACHE = profiles
+    return DOMAIN_PROFILE_CACHE
+
+
+def get_domain_extent(domain_id, layer_profile='bg'):
+    profile = get_domain_profiles()[domain_id]
+    return profile['extent']
+
+
+def get_domain_root_relative_dir(domain_id):
+    return os.path.join('images', 'domains', domain_id)
+
+
+def get_panel_output_dir(domain_id, category, panel_name, output_root=None):
+    base_root = output_root or os.path.join('images', 'domains')
+    return os.path.join(base_root, domain_id, category, panel_name)
+
+
+def resolve_panel_output_dirs(domain_ids, category, panel_name, output_dir=None, output_root=None):
+    if output_dir is not None and output_root is not None:
+        raise ValueError('output_dir and output_root cannot be used together')
+
+    if output_dir is not None:
+        if len(domain_ids) != 1:
+            raise ValueError('A single explicit output_dir can only be used with one domain')
+        return {domain_ids[0]: output_dir}
+
+    return {
+        domain_id: get_panel_output_dir(domain_id, category, panel_name, output_root=output_root)
+        for domain_id in domain_ids
+    }
 
 
 def get_prepared_land_geometry():
@@ -196,6 +362,18 @@ def pair_published_frames(left_frames, right_frames):
     ]
 
 
+def build_categories_manifest(root_relative_dir, base_dir):
+    categories = {}
+
+    for category, (left_subdir, right_subdir) in CATEGORY_PANEL_DIRS.items():
+        categories[category] = pair_published_frames(
+            list_published_frames(os.path.join(root_relative_dir, left_subdir), base_dir),
+            list_published_frames(os.path.join(root_relative_dir, right_subdir), base_dir),
+        )
+
+    return categories
+
+
 def write_frame_manifest(base_dir=None):
     if base_dir is None:
         base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -203,26 +381,20 @@ def write_frame_manifest(base_dir=None):
     images_dir = os.path.join(base_dir, 'images')
     os.makedirs(images_dir, exist_ok=True)
 
+    domains = {}
+    for domain_id in normalize_domain_ids():
+        domain_root = get_domain_root_relative_dir(domain_id)
+        categories = build_categories_manifest(domain_root, base_dir)
+
+        domains[domain_id] = {
+            'label': DOMAIN_DEFINITIONS[domain_id]['label'],
+            'categories': categories,
+        }
+
     manifest = {
         'generatedAt': datetime.now(timezone.utc).isoformat(),
-        'categories': {
-            'BG': pair_published_frames(
-                list_published_frames(os.path.join('images', 'BG', 'US'), base_dir),
-                list_published_frames(os.path.join('images', 'BG', 'ICON'), base_dir),
-            ),
-            'TS': pair_published_frames(
-                list_published_frames(os.path.join('images', 'TS', 'Flash density'), base_dir),
-                list_published_frames(os.path.join('images', 'TS', 'Severe storm potential'), base_dir),
-            ),
-            'Airmass': pair_published_frames(
-                list_published_frames(os.path.join('images', 'Airmass', 'FZL'), base_dir),
-                list_published_frames(os.path.join('images', 'Airmass', 'Snow level'), base_dir),
-            ),
-            'Turb': pair_published_frames(
-                list_published_frames(os.path.join('images', 'Turb', 'MTW'), base_dir),
-                list_published_frames(os.path.join('images', 'Turb', 'Wind'), base_dir),
-            ),
-        },
+        'domainOrder': normalize_domain_ids(),
+        'domains': domains,
     }
 
     manifest_path = os.path.join(images_dir, 'manifest.json')
@@ -694,10 +866,10 @@ def get_gfs_convective_precip_accumulation(forecast_hour, init_time):
         'file': grib_file,
         'dir': f'/gfs.{run_date}/{run_cycle}/atmos',
         'subregion': '',
-        'leftlon': str(lon_min),
-        'rightlon': str(lon_max),
-        'toplat': str(lat_max),
-        'bottomlat': str(lat_min),
+        'leftlon': str(data_lon_min),
+        'rightlon': str(data_lon_max),
+        'toplat': str(data_lat_max),
+        'bottomlat': str(data_lat_min),
         'var_ACPCP': 'on',
         'lev_surface': 'on',
     }
@@ -834,10 +1006,10 @@ def get_gfs_data(forecast_hour=9, latest_dataset=None, init_time=None, include_t
         'file': grib_file,
         'dir': f'/gfs.{run_date}/{run_cycle}/atmos',
         'subregion': '',
-        'leftlon': str(lon_min),
-        'rightlon': str(lon_max),
-        'toplat': str(lat_max),
-        'bottomlat': str(lat_min),
+        'leftlon': str(data_lon_min),
+        'rightlon': str(data_lon_max),
+        'toplat': str(data_lat_max),
+        'bottomlat': str(data_lat_min),
         'var_PRMSL': 'on',
         'var_HGT': 'on',
         'var_PRATE': 'on',
@@ -1116,18 +1288,18 @@ def _load_icon_static_remap(icon_run):
     clon_0360 = np.where(clon < 0, clon + 360.0, clon)
 
     domain_mask = (
-        (clat >= lat_min - 1.0)
-        & (clat <= lat_max + 1.0)
-        & (clon_0360 >= lon_min - 1.0)
-        & (clon_0360 <= lon_max + 1.0)
+        (clat >= data_lat_min - 1.0)
+        & (clat <= data_lat_max + 1.0)
+        & (clon_0360 >= data_lon_min - 1.0)
+        & (clon_0360 <= data_lon_max + 1.0)
     )
 
     clat_sel = clat[domain_mask]
     clon_sel = clon_0360[domain_mask]
     hsurf_sel = hsurf_da.values[domain_mask]
 
-    target_lons = np.arange(lon_min, lon_max + 0.0001, 0.25)
-    target_lats = np.arange(lat_min, lat_max + 0.0001, 0.25)
+    target_lons = np.arange(data_lon_min, data_lon_max + 0.0001, 0.25)
+    target_lats = np.arange(data_lat_min, data_lat_max + 0.0001, 0.25)
     lon_grid, lat_grid = np.meshgrid(target_lons, target_lats)
 
     points = np.column_stack((clon_sel, clat_sel))
@@ -1279,7 +1451,7 @@ def get_icon_data(forecast_hour, icon_run, remap_state, prev_tp_values=None):
     return ds, icon_run['init_time'], tp_da.values
 
 # Function to plot the map
-def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg'):
+def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg', domain_id='AU'):
     fig = plt.figure(figsize=(12, 10))
     ax = fig.add_subplot(1, 1, 1, projection=ccrs.PlateCarree())
 
@@ -1294,19 +1466,10 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
     airmass_snow_profile = layer_profile == 'airmass_snow'
     airmass_profile = airmass_fzl_profile or airmass_snow_profile
 
-    if turb_mtw_profile:
-        plot_lat_min = -47.0
-        plot_lat_max = -28.0
-        mtw_center_lon = (128.0 + 162.0) / 2.0
-        original_aspect_ratio = (lon_max - lon_min) / (lat_max - lat_min)
-        mtw_lon_span = (plot_lat_max - plot_lat_min) * original_aspect_ratio
-        plot_lon_min = mtw_center_lon - (mtw_lon_span / 2.0)
-        plot_lon_max = mtw_center_lon + (mtw_lon_span / 2.0)
-    else:
-        plot_lat_min = lat_min
-        plot_lat_max = lat_max
-        plot_lon_min = lon_min
-        plot_lon_max = lon_max
+    plot_lon_min, plot_lon_max, plot_lat_min, plot_lat_max = get_domain_extent(
+        domain_id,
+        layer_profile=layer_profile,
+    )
 
     # Keep TS profile layering unchanged while restoring the requested BG/Turb stack.
     if bg_or_turb_profile:
@@ -2110,7 +2273,7 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             transform=ccrs.PlateCarree(),
             zorder=z_fog)
 
-    if airmass_profile:
+    if airmass_fzl_profile:
         # Plot freezing fog using BG fog thresholds but only where surface temp < 0C.
         temp_2m = get_time_index(data['Temperature_height_above_ground'].sel(height_above_ground3=2)) - 273.15
         dewpoint_2m = get_time_index(data['Dewpoint_temperature_height_above_ground'].sel(height_above_ground4=2)) - 273.15
@@ -2402,15 +2565,32 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
     
     return fig
 
-def generate_gfs_bg_frames(forecast_hours, output_dir='images/BG/US', latest_dataset=None, init_time=None, update_manifest=True):
-    os.makedirs(output_dir, exist_ok=True)
+def generate_gfs_bg_frames(
+    forecast_hours,
+    output_dir=None,
+    latest_dataset=None,
+    init_time=None,
+    update_manifest=True,
+    domain_ids=None,
+    output_root=None,
+):
+    domain_ids = normalize_domain_ids(domain_ids)
+    output_dirs = resolve_panel_output_dirs(domain_ids, 'BG', 'US', output_dir=output_dir, output_root=output_root)
+    for domain_output_dir in output_dirs.values():
+        os.makedirs(domain_output_dir, exist_ok=True)
     if latest_dataset is None or init_time is None:
         latest_dataset, init_time = get_latest_gfs_dataset()
 
     # Generate the full new run in a temporary OS directory so the published folder stays stable
-    with tempfile.TemporaryDirectory(prefix='avmaps_bg_us_') as temp_dir:
-        print(f'Generating {len(forecast_hours)} forecast frames in temporary workspace: {temp_dir}')
-        generated_files = []
+    with tempfile.TemporaryDirectory(prefix='avmaps_bg_us_') as staging_root:
+        temp_dirs = {}
+        generated_files_by_domain = {domain_id: [] for domain_id in domain_ids}
+        for domain_id in domain_ids:
+            temp_dir = os.path.join(staging_root, domain_id)
+            os.makedirs(temp_dir, exist_ok=True)
+            temp_dirs[domain_id] = temp_dir
+
+        print(f'Generating {len(forecast_hours)} BG forecast frames for domains {", ".join(domain_ids)} in temporary workspace: {staging_root}')
 
         for forecast_hour in forecast_hours:
             print(f'\nGenerating frame +{forecast_hour}hrs...')
@@ -2420,30 +2600,46 @@ def generate_gfs_bg_frames(forecast_hours, output_dir='images/BG/US', latest_dat
             print('Using raw hourly GFS 0.25 model fields')
 
             # Plot map
-            fig = plot_map(data, init_time, forecast_hour, model_name='GFS')
-
             filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.png'
-            temp_filepath = os.path.join(temp_dir, filename)
-            fig.savefig(temp_filepath, dpi=150, bbox_inches='tight')
-            plt.close(fig)
-            generated_files.append(filename)
+            for domain_id in domain_ids:
+                fig = plot_map(data, init_time, forecast_hour, model_name='GFS', domain_id=domain_id)
+                temp_filepath = os.path.join(temp_dirs[domain_id], filename)
+                fig.savefig(temp_filepath, dpi=150, bbox_inches='tight')
+                plt.close(fig)
+                generated_files_by_domain[domain_id].append(filename)
+                print(f'BG map staged for {domain_id} at {temp_filepath}')
 
-            print(f'Map staged at {temp_filepath}')
-
-        print(f'\nFinished building {len(generated_files)} frames. Publishing to {output_dir}...')
-        publish_generated_frames(output_dir, generated_files, temp_dir)
+        for domain_id in domain_ids:
+            print(f'\nFinished building {len(generated_files_by_domain[domain_id])} BG frames for {domain_id}. Publishing to {output_dirs[domain_id]}...')
+            publish_generated_frames(output_dirs[domain_id], generated_files_by_domain[domain_id], temp_dirs[domain_id])
         if update_manifest:
             write_frame_manifest()
 
 
-def generate_gfs_ts_flash_frames(forecast_hours, output_dir='images/TS/Flash density', latest_dataset=None, init_time=None, update_manifest=True):
-    os.makedirs(output_dir, exist_ok=True)
+def generate_gfs_ts_flash_frames(
+    forecast_hours,
+    output_dir=None,
+    latest_dataset=None,
+    init_time=None,
+    update_manifest=True,
+    domain_ids=None,
+    output_root=None,
+):
+    domain_ids = normalize_domain_ids(domain_ids)
+    output_dirs = resolve_panel_output_dirs(domain_ids, 'TS', 'Flash density', output_dir=output_dir, output_root=output_root)
+    for domain_output_dir in output_dirs.values():
+        os.makedirs(domain_output_dir, exist_ok=True)
     if latest_dataset is None or init_time is None:
         latest_dataset, init_time = get_latest_gfs_dataset()
 
-    with tempfile.TemporaryDirectory(prefix='avmaps_ts_flash_') as temp_dir:
-        print(f'Generating {len(forecast_hours)} TS flash-density frames in temporary workspace: {temp_dir}')
-        generated_files = []
+    with tempfile.TemporaryDirectory(prefix='avmaps_ts_flash_') as staging_root:
+        print(f'Generating {len(forecast_hours)} TS flash-density frames for domains {", ".join(domain_ids)} in temporary workspace: {staging_root}')
+        temp_dirs = {}
+        generated_files_by_domain = {domain_id: [] for domain_id in domain_ids}
+        for domain_id in domain_ids:
+            temp_dir = os.path.join(staging_root, domain_id)
+            os.makedirs(temp_dir, exist_ok=True)
+            temp_dirs[domain_id] = temp_dir
         prev_acpcp_values = None
         last_generated_hour = None
 
@@ -2461,30 +2657,46 @@ def generate_gfs_ts_flash_frames(forecast_hours, output_dir='images/TS/Flash den
             last_generated_hour = forecast_hour
             print('Using raw hourly GFS convective precipitation, Total Totals, and geometric vertical velocity fields')
 
-            fig = plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='ts_flash')
-
             filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.png'
-            temp_filepath = os.path.join(temp_dir, filename)
-            fig.savefig(temp_filepath, dpi=150, bbox_inches='tight')
-            plt.close(fig)
-            generated_files.append(filename)
+            for domain_id in domain_ids:
+                fig = plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='ts_flash', domain_id=domain_id)
+                temp_filepath = os.path.join(temp_dirs[domain_id], filename)
+                fig.savefig(temp_filepath, dpi=150, bbox_inches='tight')
+                plt.close(fig)
+                generated_files_by_domain[domain_id].append(filename)
+                print(f'TS flash-density map staged for {domain_id} at {temp_filepath}')
 
-            print(f'TS flash-density map staged at {temp_filepath}')
-
-        print(f'\nFinished building {len(generated_files)} TS flash-density frames. Publishing to {output_dir}...')
-        publish_generated_frames(output_dir, generated_files, temp_dir)
+        for domain_id in domain_ids:
+            print(f'\nFinished building {len(generated_files_by_domain[domain_id])} TS flash-density frames for {domain_id}. Publishing to {output_dirs[domain_id]}...')
+            publish_generated_frames(output_dirs[domain_id], generated_files_by_domain[domain_id], temp_dirs[domain_id])
         if update_manifest:
             write_frame_manifest()
 
 
-def generate_gfs_ts_severe_frames(forecast_hours, output_dir='images/TS/Severe storm potential', latest_dataset=None, init_time=None, update_manifest=True):
-    os.makedirs(output_dir, exist_ok=True)
+def generate_gfs_ts_severe_frames(
+    forecast_hours,
+    output_dir=None,
+    latest_dataset=None,
+    init_time=None,
+    update_manifest=True,
+    domain_ids=None,
+    output_root=None,
+):
+    domain_ids = normalize_domain_ids(domain_ids)
+    output_dirs = resolve_panel_output_dirs(domain_ids, 'TS', 'Severe storm potential', output_dir=output_dir, output_root=output_root)
+    for domain_output_dir in output_dirs.values():
+        os.makedirs(domain_output_dir, exist_ok=True)
     if latest_dataset is None or init_time is None:
         latest_dataset, init_time = get_latest_gfs_dataset()
 
-    with tempfile.TemporaryDirectory(prefix='avmaps_ts_severe_') as temp_dir:
-        print(f'Generating {len(forecast_hours)} TS severe-potential frames in temporary workspace: {temp_dir}')
-        generated_files = []
+    with tempfile.TemporaryDirectory(prefix='avmaps_ts_severe_') as staging_root:
+        print(f'Generating {len(forecast_hours)} TS severe-potential frames for domains {", ".join(domain_ids)} in temporary workspace: {staging_root}')
+        temp_dirs = {}
+        generated_files_by_domain = {domain_id: [] for domain_id in domain_ids}
+        for domain_id in domain_ids:
+            temp_dir = os.path.join(staging_root, domain_id)
+            os.makedirs(temp_dir, exist_ok=True)
+            temp_dirs[domain_id] = temp_dir
         prev_acpcp_values = None
         last_generated_hour = None
 
@@ -2502,30 +2714,46 @@ def generate_gfs_ts_severe_frames(forecast_hours, output_dir='images/TS/Severe s
             last_generated_hour = forecast_hour
             print('Using raw hourly GFS convective precipitation, Total Totals, and geometric vertical velocity fields')
 
-            fig = plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='ts_severe')
-
             filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.png'
-            temp_filepath = os.path.join(temp_dir, filename)
-            fig.savefig(temp_filepath, dpi=150, bbox_inches='tight')
-            plt.close(fig)
-            generated_files.append(filename)
+            for domain_id in domain_ids:
+                fig = plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='ts_severe', domain_id=domain_id)
+                temp_filepath = os.path.join(temp_dirs[domain_id], filename)
+                fig.savefig(temp_filepath, dpi=150, bbox_inches='tight')
+                plt.close(fig)
+                generated_files_by_domain[domain_id].append(filename)
+                print(f'TS severe-potential map staged for {domain_id} at {temp_filepath}')
 
-            print(f'TS severe-potential map staged at {temp_filepath}')
-
-        print(f'\nFinished building {len(generated_files)} TS severe-potential frames. Publishing to {output_dir}...')
-        publish_generated_frames(output_dir, generated_files, temp_dir)
+        for domain_id in domain_ids:
+            print(f'\nFinished building {len(generated_files_by_domain[domain_id])} TS severe-potential frames for {domain_id}. Publishing to {output_dirs[domain_id]}...')
+            publish_generated_frames(output_dirs[domain_id], generated_files_by_domain[domain_id], temp_dirs[domain_id])
         if update_manifest:
             write_frame_manifest()
 
 
-def generate_gfs_airmass_fzl_frames(forecast_hours, output_dir='images/Airmass/FZL', latest_dataset=None, init_time=None, update_manifest=True):
-    os.makedirs(output_dir, exist_ok=True)
+def generate_gfs_airmass_fzl_frames(
+    forecast_hours,
+    output_dir=None,
+    latest_dataset=None,
+    init_time=None,
+    update_manifest=True,
+    domain_ids=None,
+    output_root=None,
+):
+    domain_ids = normalize_domain_ids(domain_ids)
+    output_dirs = resolve_panel_output_dirs(domain_ids, 'Airmass', 'FZL', output_dir=output_dir, output_root=output_root)
+    for domain_output_dir in output_dirs.values():
+        os.makedirs(domain_output_dir, exist_ok=True)
     if latest_dataset is None or init_time is None:
         latest_dataset, init_time = get_latest_gfs_dataset()
 
-    with tempfile.TemporaryDirectory(prefix='avmaps_airmass_fzl_') as temp_dir:
-        print(f'Generating {len(forecast_hours)} Airmass/FZL frames in temporary workspace: {temp_dir}')
-        generated_files = []
+    with tempfile.TemporaryDirectory(prefix='avmaps_airmass_fzl_') as staging_root:
+        print(f'Generating {len(forecast_hours)} Airmass/FZL frames for domains {", ".join(domain_ids)} in temporary workspace: {staging_root}')
+        temp_dirs = {}
+        generated_files_by_domain = {domain_id: [] for domain_id in domain_ids}
+        for domain_id in domain_ids:
+            temp_dir = os.path.join(staging_root, domain_id)
+            os.makedirs(temp_dir, exist_ok=True)
+            temp_dirs[domain_id] = temp_dir
         prev_acpcp_values = None
         last_generated_hour = None
 
@@ -2544,30 +2772,46 @@ def generate_gfs_airmass_fzl_frames(forecast_hours, output_dir='images/Airmass/F
             last_generated_hour = forecast_hour
             print('Using raw hourly GFS convective precipitation and airmass fields')
 
-            fig = plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='airmass_fzl')
-
             filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.png'
-            temp_filepath = os.path.join(temp_dir, filename)
-            fig.savefig(temp_filepath, dpi=150, bbox_inches='tight')
-            plt.close(fig)
-            generated_files.append(filename)
+            for domain_id in domain_ids:
+                fig = plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='airmass_fzl', domain_id=domain_id)
+                temp_filepath = os.path.join(temp_dirs[domain_id], filename)
+                fig.savefig(temp_filepath, dpi=150, bbox_inches='tight')
+                plt.close(fig)
+                generated_files_by_domain[domain_id].append(filename)
+                print(f'Airmass/FZL map staged for {domain_id} at {temp_filepath}')
 
-            print(f'Airmass/FZL map staged at {temp_filepath}')
-
-        print(f'\nFinished building {len(generated_files)} Airmass/FZL frames. Publishing to {output_dir}...')
-        publish_generated_frames(output_dir, generated_files, temp_dir)
+        for domain_id in domain_ids:
+            print(f'\nFinished building {len(generated_files_by_domain[domain_id])} Airmass/FZL frames for {domain_id}. Publishing to {output_dirs[domain_id]}...')
+            publish_generated_frames(output_dirs[domain_id], generated_files_by_domain[domain_id], temp_dirs[domain_id])
         if update_manifest:
             write_frame_manifest()
 
 
-def generate_gfs_airmass_snow_frames(forecast_hours, output_dir='images/Airmass/Snow level', latest_dataset=None, init_time=None, update_manifest=True):
-    os.makedirs(output_dir, exist_ok=True)
+def generate_gfs_airmass_snow_frames(
+    forecast_hours,
+    output_dir=None,
+    latest_dataset=None,
+    init_time=None,
+    update_manifest=True,
+    domain_ids=None,
+    output_root=None,
+):
+    domain_ids = normalize_domain_ids(domain_ids)
+    output_dirs = resolve_panel_output_dirs(domain_ids, 'Airmass', 'Snow level', output_dir=output_dir, output_root=output_root)
+    for domain_output_dir in output_dirs.values():
+        os.makedirs(domain_output_dir, exist_ok=True)
     if latest_dataset is None or init_time is None:
         latest_dataset, init_time = get_latest_gfs_dataset()
 
-    with tempfile.TemporaryDirectory(prefix='avmaps_airmass_snow_') as temp_dir:
-        print(f'Generating {len(forecast_hours)} Airmass/Snow level frames in temporary workspace: {temp_dir}')
-        generated_files = []
+    with tempfile.TemporaryDirectory(prefix='avmaps_airmass_snow_') as staging_root:
+        print(f'Generating {len(forecast_hours)} Airmass/Snow level frames for domains {", ".join(domain_ids)} in temporary workspace: {staging_root}')
+        temp_dirs = {}
+        generated_files_by_domain = {domain_id: [] for domain_id in domain_ids}
+        for domain_id in domain_ids:
+            temp_dir = os.path.join(staging_root, domain_id)
+            os.makedirs(temp_dir, exist_ok=True)
+            temp_dirs[domain_id] = temp_dir
 
         for forecast_hour in forecast_hours:
             print(f'\nGenerating Airmass/Snow level frame +{forecast_hour}hrs...')
@@ -2580,18 +2824,18 @@ def generate_gfs_airmass_snow_frames(forecast_hours, output_dir='images/Airmass/
             )
             print('Using raw hourly GFS precipitation and airmass fields')
 
-            fig = plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='airmass_snow')
-
             filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.png'
-            temp_filepath = os.path.join(temp_dir, filename)
-            fig.savefig(temp_filepath, dpi=150, bbox_inches='tight')
-            plt.close(fig)
-            generated_files.append(filename)
+            for domain_id in domain_ids:
+                fig = plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='airmass_snow', domain_id=domain_id)
+                temp_filepath = os.path.join(temp_dirs[domain_id], filename)
+                fig.savefig(temp_filepath, dpi=150, bbox_inches='tight')
+                plt.close(fig)
+                generated_files_by_domain[domain_id].append(filename)
+                print(f'Airmass/Snow level map staged for {domain_id} at {temp_filepath}')
 
-            print(f'Airmass/Snow level map staged at {temp_filepath}')
-
-        print(f'\nFinished building {len(generated_files)} Airmass/Snow level frames. Publishing to {output_dir}...')
-        publish_generated_frames(output_dir, generated_files, temp_dir)
+        for domain_id in domain_ids:
+            print(f'\nFinished building {len(generated_files_by_domain[domain_id])} Airmass/Snow level frames for {domain_id}. Publishing to {output_dirs[domain_id]}...')
+            publish_generated_frames(output_dirs[domain_id], generated_files_by_domain[domain_id], temp_dirs[domain_id])
         if update_manifest:
             write_frame_manifest()
 
@@ -2600,24 +2844,36 @@ def _generate_gfs_turb_frames_internal(
     forecast_hours,
     include_mtw=True,
     include_wind=True,
-    mtw_output_dir='images/Turb/MTW',
-    wind_output_dir='images/Turb/Wind',
+    mtw_output_dir=None,
+    wind_output_dir=None,
     latest_dataset=None,
     init_time=None,
     update_manifest=True,
+    domain_ids=None,
+    output_root=None,
 ):
     if not include_mtw and not include_wind:
         print('No turbulence outputs requested; nothing to do.')
         return
 
+    domain_ids = normalize_domain_ids(domain_ids)
+
+    mtw_output_dirs = {}
     if include_mtw:
-        os.makedirs(mtw_output_dir, exist_ok=True)
+        mtw_output_dirs = resolve_panel_output_dirs(domain_ids, 'Turb', 'MTW', output_dir=mtw_output_dir, output_root=output_root)
+        for domain_output_dir in mtw_output_dirs.values():
+            os.makedirs(domain_output_dir, exist_ok=True)
+
+    wind_output_dirs = {}
     if include_wind:
-        os.makedirs(wind_output_dir, exist_ok=True)
+        wind_output_dirs = resolve_panel_output_dirs(domain_ids, 'Turb', 'Wind', output_dir=wind_output_dir, output_root=output_root)
+        for domain_output_dir in wind_output_dirs.values():
+            os.makedirs(domain_output_dir, exist_ok=True)
+
     if latest_dataset is None or init_time is None:
         latest_dataset, init_time = get_latest_gfs_dataset()
 
-    with tempfile.TemporaryDirectory(prefix='avmaps_turb_mtw_') as mtw_temp_dir, tempfile.TemporaryDirectory(prefix='avmaps_turb_wind_') as wind_temp_dir:
+    with tempfile.TemporaryDirectory(prefix='avmaps_turb_mtw_') as mtw_staging_root, tempfile.TemporaryDirectory(prefix='avmaps_turb_wind_') as wind_staging_root:
         targets = []
         if include_mtw:
             targets.append('MTW')
@@ -2625,12 +2881,25 @@ def _generate_gfs_turb_frames_internal(
             targets.append('Wind')
 
         print(
-            f"Generating {len(forecast_hours)} Turb {'/'.join(targets)} frames in temporary workspaces: "
-            f'{mtw_temp_dir} and {wind_temp_dir}'
+            f"Generating {len(forecast_hours)} Turb {'/'.join(targets)} frames for domains {', '.join(domain_ids)} in temporary workspaces: "
+            f'{mtw_staging_root} and {wind_staging_root}'
         )
 
-        mtw_generated_files = []
-        wind_generated_files = []
+        mtw_temp_dirs = {}
+        mtw_generated_files = {domain_id: [] for domain_id in domain_ids}
+        if include_mtw:
+            for domain_id in domain_ids:
+                temp_dir = os.path.join(mtw_staging_root, domain_id)
+                os.makedirs(temp_dir, exist_ok=True)
+                mtw_temp_dirs[domain_id] = temp_dir
+
+        wind_temp_dirs = {}
+        wind_generated_files = {domain_id: [] for domain_id in domain_ids}
+        if include_wind:
+            for domain_id in domain_ids:
+                temp_dir = os.path.join(wind_staging_root, domain_id)
+                os.makedirs(temp_dir, exist_ok=True)
+                wind_temp_dirs[domain_id] = temp_dir
 
         for forecast_hour in forecast_hours:
             print(f'\nGenerating Turb frame +{forecast_hour}hrs...')
@@ -2644,36 +2913,48 @@ def _generate_gfs_turb_frames_internal(
             print('Using raw hourly GFS 0.25 model fields for Turb maps')
 
             if include_mtw:
-                mtw_fig = plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='turb_mtw')
                 mtw_filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.png'
-                mtw_temp_filepath = os.path.join(mtw_temp_dir, mtw_filename)
-                mtw_fig.savefig(mtw_temp_filepath, dpi=150, bbox_inches='tight')
-                plt.close(mtw_fig)
-                mtw_generated_files.append(mtw_filename)
-                print(f'Turb/MTW map staged at {mtw_temp_filepath}')
+                for domain_id in domain_ids:
+                    mtw_fig = plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='turb_mtw', domain_id=domain_id)
+                    mtw_temp_filepath = os.path.join(mtw_temp_dirs[domain_id], mtw_filename)
+                    mtw_fig.savefig(mtw_temp_filepath, dpi=150, bbox_inches='tight')
+                    plt.close(mtw_fig)
+                    mtw_generated_files[domain_id].append(mtw_filename)
+                    print(f'Turb/MTW map staged for {domain_id} at {mtw_temp_filepath}')
 
             if include_wind:
-                wind_fig = plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='turb_wind')
                 wind_filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.png'
-                wind_temp_filepath = os.path.join(wind_temp_dir, wind_filename)
-                wind_fig.savefig(wind_temp_filepath, dpi=150, bbox_inches='tight')
-                plt.close(wind_fig)
-                wind_generated_files.append(wind_filename)
-                print(f'Turb/Wind map staged at {wind_temp_filepath}')
+                for domain_id in domain_ids:
+                    wind_fig = plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='turb_wind', domain_id=domain_id)
+                    wind_temp_filepath = os.path.join(wind_temp_dirs[domain_id], wind_filename)
+                    wind_fig.savefig(wind_temp_filepath, dpi=150, bbox_inches='tight')
+                    plt.close(wind_fig)
+                    wind_generated_files[domain_id].append(wind_filename)
+                    print(f'Turb/Wind map staged for {domain_id} at {wind_temp_filepath}')
 
         if include_mtw:
-            print(f'\nFinished building {len(mtw_generated_files)} Turb/MTW frames. Publishing to {mtw_output_dir}...')
-            publish_generated_frames(mtw_output_dir, mtw_generated_files, mtw_temp_dir)
+            for domain_id in domain_ids:
+                print(f'\nFinished building {len(mtw_generated_files[domain_id])} Turb/MTW frames for {domain_id}. Publishing to {mtw_output_dirs[domain_id]}...')
+                publish_generated_frames(mtw_output_dirs[domain_id], mtw_generated_files[domain_id], mtw_temp_dirs[domain_id])
 
         if include_wind:
-            print(f'Finished building {len(wind_generated_files)} Turb/Wind frames. Publishing to {wind_output_dir}...')
-            publish_generated_frames(wind_output_dir, wind_generated_files, wind_temp_dir)
+            for domain_id in domain_ids:
+                print(f'Finished building {len(wind_generated_files[domain_id])} Turb/Wind frames for {domain_id}. Publishing to {wind_output_dirs[domain_id]}...')
+                publish_generated_frames(wind_output_dirs[domain_id], wind_generated_files[domain_id], wind_temp_dirs[domain_id])
 
         if update_manifest:
             write_frame_manifest()
 
 
-def generate_gfs_turb_mtw_frames(forecast_hours, output_dir='images/Turb/MTW', latest_dataset=None, init_time=None, update_manifest=True):
+def generate_gfs_turb_mtw_frames(
+    forecast_hours,
+    output_dir=None,
+    latest_dataset=None,
+    init_time=None,
+    update_manifest=True,
+    domain_ids=None,
+    output_root=None,
+):
     _generate_gfs_turb_frames_internal(
         forecast_hours,
         include_mtw=True,
@@ -2682,10 +2963,20 @@ def generate_gfs_turb_mtw_frames(forecast_hours, output_dir='images/Turb/MTW', l
         latest_dataset=latest_dataset,
         init_time=init_time,
         update_manifest=update_manifest,
+        domain_ids=domain_ids,
+        output_root=output_root,
     )
 
 
-def generate_gfs_turb_wind_frames(forecast_hours, output_dir='images/Turb/Wind', latest_dataset=None, init_time=None, update_manifest=True):
+def generate_gfs_turb_wind_frames(
+    forecast_hours,
+    output_dir=None,
+    latest_dataset=None,
+    init_time=None,
+    update_manifest=True,
+    domain_ids=None,
+    output_root=None,
+):
     _generate_gfs_turb_frames_internal(
         forecast_hours,
         include_mtw=False,
@@ -2694,16 +2985,20 @@ def generate_gfs_turb_wind_frames(forecast_hours, output_dir='images/Turb/Wind',
         latest_dataset=latest_dataset,
         init_time=init_time,
         update_manifest=update_manifest,
+        domain_ids=domain_ids,
+        output_root=output_root,
     )
 
 
 def generate_gfs_turb_frames(
     forecast_hours,
-    mtw_output_dir='images/Turb/MTW',
-    wind_output_dir='images/Turb/Wind',
+    mtw_output_dir=None,
+    wind_output_dir=None,
     latest_dataset=None,
     init_time=None,
     update_manifest=True,
+    domain_ids=None,
+    output_root=None,
 ):
     _generate_gfs_turb_frames_internal(
         forecast_hours,
@@ -2714,11 +3009,25 @@ def generate_gfs_turb_frames(
         latest_dataset=latest_dataset,
         init_time=init_time,
         update_manifest=update_manifest,
+        domain_ids=domain_ids,
+        output_root=output_root,
     )
 
 
-def generate_icon_bg_frames(forecast_hours, preferred_run_time=None, output_dir='images/BG/ICON', icon_run=None, remap_state=None, update_manifest=True):
-    os.makedirs(output_dir, exist_ok=True)
+def generate_icon_bg_frames(
+    forecast_hours,
+    preferred_run_time=None,
+    output_dir=None,
+    icon_run=None,
+    remap_state=None,
+    update_manifest=True,
+    domain_ids=None,
+    output_root=None,
+):
+    domain_ids = normalize_domain_ids(domain_ids)
+    output_dirs = resolve_panel_output_dirs(domain_ids, 'BG', 'ICON', output_dir=output_dir, output_root=output_root)
+    for domain_output_dir in output_dirs.values():
+        os.makedirs(domain_output_dir, exist_ok=True)
 
     if icon_run is None:
         icon_run = get_latest_icon_run(target_time=preferred_run_time)
@@ -2726,9 +3035,14 @@ def generate_icon_bg_frames(forecast_hours, preferred_run_time=None, output_dir=
     if remap_state is None:
         remap_state = _load_icon_static_remap(icon_run)
 
-    with tempfile.TemporaryDirectory(prefix='avmaps_bg_icon_') as temp_dir:
-        print(f'Generating {len(forecast_hours)} ICON forecast frames in temporary workspace: {temp_dir}')
-        generated_files = []
+    with tempfile.TemporaryDirectory(prefix='avmaps_bg_icon_') as staging_root:
+        print(f'Generating {len(forecast_hours)} ICON forecast frames for domains {", ".join(domain_ids)} in temporary workspace: {staging_root}')
+        temp_dirs = {}
+        generated_files_by_domain = {domain_id: [] for domain_id in domain_ids}
+        for domain_id in domain_ids:
+            temp_dir = os.path.join(staging_root, domain_id)
+            os.makedirs(temp_dir, exist_ok=True)
+            temp_dirs[domain_id] = temp_dir
 
         prev_tp_values = None
         last_generated_hour = None
@@ -2746,25 +3060,26 @@ def generate_icon_bg_frames(forecast_hours, preferred_run_time=None, output_dir=
             last_generated_hour = forecast_hour
             print('Using raw hourly ICON model fields')
 
-            fig = plot_map(data, init_time, forecast_hour, model_name='ICON')
-
             filename = f'ICON_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.png'
-            temp_filepath = os.path.join(temp_dir, filename)
-            fig.savefig(temp_filepath, dpi=150, bbox_inches='tight')
-            plt.close(fig)
-            generated_files.append(filename)
+            for domain_id in domain_ids:
+                fig = plot_map(data, init_time, forecast_hour, model_name='ICON', domain_id=domain_id)
+                temp_filepath = os.path.join(temp_dirs[domain_id], filename)
+                fig.savefig(temp_filepath, dpi=150, bbox_inches='tight')
+                plt.close(fig)
+                generated_files_by_domain[domain_id].append(filename)
+                print(f'ICON map staged for {domain_id} at {temp_filepath}')
 
-            print(f'ICON map staged at {temp_filepath}')
-
-        print(f'\nFinished building {len(generated_files)} ICON frames. Publishing to {output_dir}...')
-        publish_generated_frames(output_dir, generated_files, temp_dir)
+        for domain_id in domain_ids:
+            print(f'\nFinished building {len(generated_files_by_domain[domain_id])} ICON frames for {domain_id}. Publishing to {output_dirs[domain_id]}...')
+            publish_generated_frames(output_dirs[domain_id], generated_files_by_domain[domain_id], temp_dirs[domain_id])
         if update_manifest:
             write_frame_manifest()
 
 
-def generate_all_layers_atomically(forecast_hours, model='both'):
+def generate_all_layers_atomically(forecast_hours, model='both', domain_ids=None):
     script_dir = os.path.dirname(os.path.abspath(__file__))
     staged_targets = []
+    domain_ids = normalize_domain_ids(domain_ids)
 
     gfs_latest_dataset = None
     gfs_init_time = None
@@ -2782,80 +3097,85 @@ def generate_all_layers_atomically(forecast_hours, model='both'):
 
     with tempfile.TemporaryDirectory(prefix='.avmaps_atomic_publish_', dir=script_dir) as staging_root:
         print(f'Building full staged run in {staging_root}')
-
-        def stage_path(*parts):
-            return os.path.join(staging_root, *parts)
+        stage_output_root = os.path.join(staging_root, 'images', 'domains')
 
         if model in ('gfs', 'both'):
             generate_gfs_ts_flash_frames(
                 forecast_hours,
-                output_dir=stage_path('images', 'TS', 'Flash density'),
                 latest_dataset=gfs_latest_dataset,
                 init_time=gfs_init_time,
                 update_manifest=False,
+                domain_ids=domain_ids,
+                output_root=stage_output_root,
             )
-            staged_targets.append(os.path.join('images', 'TS', 'Flash density'))
+            staged_targets.extend([os.path.join('images', 'domains', domain_id, 'TS', 'Flash density') for domain_id in domain_ids])
 
             generate_gfs_ts_severe_frames(
                 forecast_hours,
-                output_dir=stage_path('images', 'TS', 'Severe storm potential'),
                 latest_dataset=gfs_latest_dataset,
                 init_time=gfs_init_time,
                 update_manifest=False,
+                domain_ids=domain_ids,
+                output_root=stage_output_root,
             )
-            staged_targets.append(os.path.join('images', 'TS', 'Severe storm potential'))
+            staged_targets.extend([os.path.join('images', 'domains', domain_id, 'TS', 'Severe storm potential') for domain_id in domain_ids])
 
             generate_gfs_airmass_fzl_frames(
                 forecast_hours,
-                output_dir=stage_path('images', 'Airmass', 'FZL'),
                 latest_dataset=gfs_latest_dataset,
                 init_time=gfs_init_time,
                 update_manifest=False,
+                domain_ids=domain_ids,
+                output_root=stage_output_root,
             )
-            staged_targets.append(os.path.join('images', 'Airmass', 'FZL'))
+            staged_targets.extend([os.path.join('images', 'domains', domain_id, 'Airmass', 'FZL') for domain_id in domain_ids])
 
             generate_gfs_airmass_snow_frames(
                 forecast_hours,
-                output_dir=stage_path('images', 'Airmass', 'Snow level'),
                 latest_dataset=gfs_latest_dataset,
                 init_time=gfs_init_time,
                 update_manifest=False,
+                domain_ids=domain_ids,
+                output_root=stage_output_root,
             )
-            staged_targets.append(os.path.join('images', 'Airmass', 'Snow level'))
+            staged_targets.extend([os.path.join('images', 'domains', domain_id, 'Airmass', 'Snow level') for domain_id in domain_ids])
 
             generate_gfs_turb_frames(
                 forecast_hours,
-                mtw_output_dir=stage_path('images', 'Turb', 'MTW'),
-                wind_output_dir=stage_path('images', 'Turb', 'Wind'),
                 latest_dataset=gfs_latest_dataset,
                 init_time=gfs_init_time,
                 update_manifest=False,
+                domain_ids=domain_ids,
+                output_root=stage_output_root,
             )
-            staged_targets.extend([
-                os.path.join('images', 'Turb', 'MTW'),
-                os.path.join('images', 'Turb', 'Wind'),
-            ])
+            for domain_id in domain_ids:
+                staged_targets.extend([
+                    os.path.join('images', 'domains', domain_id, 'Turb', 'MTW'),
+                    os.path.join('images', 'domains', domain_id, 'Turb', 'Wind'),
+                ])
 
         if model in ('icon', 'both'):
             generate_icon_bg_frames(
                 forecast_hours,
                 preferred_run_time=(gfs_init_time if model == 'both' else None),
-                output_dir=stage_path('images', 'BG', 'ICON'),
                 icon_run=icon_run,
                 remap_state=icon_remap_state,
                 update_manifest=False,
+                domain_ids=domain_ids,
+                output_root=stage_output_root,
             )
-            staged_targets.append(os.path.join('images', 'BG', 'ICON'))
+            staged_targets.extend([os.path.join('images', 'domains', domain_id, 'BG', 'ICON') for domain_id in domain_ids])
 
         if model in ('gfs', 'both'):
             generate_gfs_bg_frames(
                 forecast_hours,
-                output_dir=stage_path('images', 'BG', 'US'),
                 latest_dataset=gfs_latest_dataset,
                 init_time=gfs_init_time,
                 update_manifest=False,
+                domain_ids=domain_ids,
+                output_root=stage_output_root,
             )
-            staged_targets.append(os.path.join('images', 'BG', 'US'))
+            staged_targets.extend([os.path.join('images', 'domains', domain_id, 'BG', 'US') for domain_id in domain_ids])
 
         publish_staged_directories_atomically(staging_root, staged_targets)
         write_frame_manifest(script_dir)
@@ -2869,64 +3189,66 @@ def main():
     parser.add_argument('--layer', choices=['bg', 'ts_flash', 'ts_severe', 'airmass_fzl', 'airmass_snow', 'turb', 'turb_mtw', 'turb_wind', 'all'], default='bg')
     parser.add_argument('--start-hour', type=int, default=9)
     parser.add_argument('--end-hour', type=int, default=35)
+    parser.add_argument('--domains', default='all', help='Comma-separated domain ids, or all. Phase 1 ids: AU,WA_SA,VIC_TAS')
     args = parser.parse_args()
 
     forecast_hours = list(range(args.start_hour, args.end_hour + 1))
+    domain_ids = normalize_domain_ids(args.domains)
 
     if args.layer == 'all':
-        generate_all_layers_atomically(forecast_hours, model=args.model)
+        generate_all_layers_atomically(forecast_hours, model=args.model, domain_ids=domain_ids)
         return
 
     if args.layer == 'ts_flash':
         if args.model != 'gfs':
             raise ValueError('The ts_flash layer is currently supported for GFS only')
-        generate_gfs_ts_flash_frames(forecast_hours)
+        generate_gfs_ts_flash_frames(forecast_hours, domain_ids=domain_ids)
         return
 
     if args.layer == 'ts_severe':
         if args.model != 'gfs':
             raise ValueError('The ts_severe layer is currently supported for GFS only')
-        generate_gfs_ts_severe_frames(forecast_hours)
+        generate_gfs_ts_severe_frames(forecast_hours, domain_ids=domain_ids)
         return
 
     if args.layer == 'airmass_fzl':
         if args.model != 'gfs':
             raise ValueError('The airmass_fzl layer is currently supported for GFS only')
-        generate_gfs_airmass_fzl_frames(forecast_hours)
+        generate_gfs_airmass_fzl_frames(forecast_hours, domain_ids=domain_ids)
         return
 
     if args.layer == 'airmass_snow':
         if args.model != 'gfs':
             raise ValueError('The airmass_snow layer is currently supported for GFS only')
-        generate_gfs_airmass_snow_frames(forecast_hours)
+        generate_gfs_airmass_snow_frames(forecast_hours, domain_ids=domain_ids)
         return
 
     if args.layer == 'turb':
         if args.model != 'gfs':
             raise ValueError('The turb layer is currently supported for GFS only')
-        generate_gfs_turb_frames(forecast_hours)
+        generate_gfs_turb_frames(forecast_hours, domain_ids=domain_ids)
         return
 
     if args.layer == 'turb_mtw':
         if args.model != 'gfs':
             raise ValueError('The turb_mtw layer is currently supported for GFS only')
-        generate_gfs_turb_mtw_frames(forecast_hours)
+        generate_gfs_turb_mtw_frames(forecast_hours, domain_ids=domain_ids)
         return
 
     if args.layer == 'turb_wind':
         if args.model != 'gfs':
             raise ValueError('The turb_wind layer is currently supported for GFS only')
-        generate_gfs_turb_wind_frames(forecast_hours)
+        generate_gfs_turb_wind_frames(forecast_hours, domain_ids=domain_ids)
         return
 
     gfs_run_time = None
     if args.model in ('gfs', 'both'):
         _, gfs_run_time = get_latest_gfs_dataset()
-        generate_gfs_bg_frames(forecast_hours)
+        generate_gfs_bg_frames(forecast_hours, domain_ids=domain_ids)
 
     if args.model in ('icon', 'both'):
         preferred_time = gfs_run_time if args.model == 'both' else None
-        generate_icon_bg_frames(forecast_hours, preferred_run_time=preferred_time)
+        generate_icon_bg_frames(forecast_hours, preferred_run_time=preferred_time, domain_ids=domain_ids)
 
 if __name__ == '__main__':
     main()

@@ -5,3 +5,7 @@
 __pycache__/
 *.pyc
 *.pyo
+
+# Generated site assets are deployed via GitHub Pages artifacts, not committed.
+images/domains/
+images/manifest.json

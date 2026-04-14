@@ -1,60 +1,82 @@
-// Configuration object defining image categories and their subfolder pairs
 const imageConfig = {
-    'Airmass': {
-        left: { folder: 'FZL', title: 'FZL', prefix: 'AIRMASSFZL', extension: 'png' },
-        right: { folder: 'Snow level', title: 'Snow Level', prefix: 'AIRMASSSL', extension: 'png' }
+    Airmass: {
+        left: { folder: 'FZL', title: 'FZL' },
+        right: { folder: 'Snow level', title: 'Snow Level' }
     },
-    'BG': {
-        left: { folder: 'US', title: 'US', prefix: '' },
-        right: { folder: 'ICON', title: 'ICON', prefix: '' }
+    BG: {
+        left: { folder: 'US', title: 'US' },
+        right: { folder: 'ICON', title: 'ICON' }
     },
-    'TS': {
-        left: { folder: 'Flash density', title: 'Flash Density', prefix: '' },
-        right: { folder: 'Severe storm potential', title: 'Severe Storm Potential', prefix: '' }
+    TS: {
+        left: { folder: 'Flash density', title: 'Flash Density' },
+        right: { folder: 'Severe storm potential', title: 'Severe Storm Potential' }
     },
-    'Turb': {
-        left: { folder: 'MTW', title: 'MTW', prefix: '' },
-        right: { folder: 'Wind', title: 'Wind', prefix: '' }
+    Turb: {
+        left: { folder: 'MTW', title: 'MTW' },
+        right: { folder: 'Wind', title: 'Wind' }
     }
 };
 
-// Global variables
+const domainHotkeys = {
+    '1': 'AU',
+    '2': 'WA_SA',
+    '3': 'VIC_TAS'
+};
+
+const categoryHotkeys = {
+    b: 'BG',
+    s: 'TS',
+    a: 'Airmass',
+    t: 'Turb'
+};
+
 let currentCategory = 'BG';
+let currentDomain = 'AU';
 let currentFrame = 1;
 const DEFAULT_MAX_FRAMES = 27;
 let maxFrames = DEFAULT_MAX_FRAMES;
 let isPlaying = false;
 let animationInterval = null;
-let animationSpeed = 500; // milliseconds
-let bgFramePairs = [];
-let tsFramePairs = [];
-let airmassFramePairs = [];
-let turbFramePairs = [];
+let animationSpeed = 500;
 let frameManifest = null;
+const framePairsCache = {};
 
-// DOM elements
-let frameSlider, leftImage, rightImage;
-let playBtn, speedSlider, speedDisplay;
+let frameSlider;
+let leftImage;
+let rightImage;
+let playBtn;
+let speedSlider;
+let speedDisplay;
 let categoryButtons;
+let loadingOverlay;
+let loadingBarFill;
+let loadingStatus;
 
-// Initialize the application when DOM is loaded
-document.addEventListener('DOMContentLoaded', function() {
-    initializeElements();
-    setupEventListeners();
-    loadCategory(currentCategory)
-        .then(() => {
-            updateImages();
-        })
-        .catch(error => {
-            console.warn('Failed to initialize category data:', error);
-            updateImages();
-        });
-});
+function ensureDomainCache(domainId) {
+    if (!framePairsCache[domainId]) {
+        framePairsCache[domainId] = {};
+    }
+    return framePairsCache[domainId];
+}
 
-function extractBgHourFromFilename(filename) {
-    const hourMatch = filename.match(/_(\d{2,3})\.[^.]+$/i);
-    if (!hourMatch) return null;
-    return parseInt(hourMatch[1], 10);
+function normalizeFrameManifest(manifest) {
+    const normalized = manifest || {};
+    const domains = normalized.domains || {};
+
+    return {
+        ...normalized,
+        domains: {
+            AU: {
+                categories: domains.AU?.categories || {}
+            },
+            WA_SA: {
+                categories: domains.WA_SA?.categories || {}
+            },
+            VIC_TAS: {
+                categories: domains.VIC_TAS?.categories || {}
+            }
+        }
+    };
 }
 
 async function loadFrameManifest(forceRefresh = false) {
@@ -68,152 +90,37 @@ async function loadFrameManifest(forceRefresh = false) {
             throw new Error(`Unable to read frame manifest: ${response.status}`);
         }
 
-        frameManifest = await response.json();
+        frameManifest = normalizeFrameManifest(await response.json());
     }
 
     return frameManifest;
 }
 
-async function discoverManifestFramePairs(category, forceRefresh = false) {
-    try {
-        const manifest = await loadFrameManifest(forceRefresh);
-        const framePairs = manifest?.categories?.[category];
-        return Array.isArray(framePairs) && framePairs.length > 0 ? framePairs : null;
-    } catch (error) {
-        console.warn(`Could not load frame manifest for ${category}; falling back to directory discovery.`, error);
-        return null;
-    }
-}
-
-async function discoverBgFramesForDirectory(directoryPath) {
-    const response = await fetch(`${directoryPath}/`);
-    if (!response.ok) {
-        throw new Error(`Unable to read ${directoryPath} directory: ${response.status}`);
+async function loadCategoryFrames(domainId, category, forceRefresh = false) {
+    const domainCache = ensureDomainCache(domainId);
+    if (!forceRefresh && Array.isArray(domainCache[category])) {
+        return domainCache[category];
     }
 
-    const html = await response.text();
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
-    const links = Array.from(doc.querySelectorAll('a'));
-
-    const frameInfo = links
-        .map(link => {
-            const href = link.getAttribute('href') || '';
-            const filename = decodeURIComponent(href.split('/').pop().split('?')[0]);
-            const hour = extractBgHourFromFilename(filename);
-            return { filename, hour };
-        })
-        .filter(entry => /\.(png|jpg|jpeg|webp)$/i.test(entry.filename) && entry.hour !== null)
-        .sort((a, b) => a.hour - b.hour)
-        .map(entry => ({
-            hour: entry.hour,
-            path: `${directoryPath}/${entry.filename}`
-        }));
-
-    if (frameInfo.length === 0) {
-        throw new Error(`No BG images found in ${directoryPath} directory`);
-    }
-
-    return frameInfo;
+    const manifest = await loadFrameManifest(forceRefresh);
+    const framePairs = manifest?.domains?.[domainId]?.categories?.[category];
+    domainCache[category] = Array.isArray(framePairs) ? framePairs : [];
+    return domainCache[category];
 }
 
-function buildFramePairs(leftFrames, rightFrames, errorMessage) {
-    const leftByHour = new Map(leftFrames.map(frame => [frame.hour, frame.path]));
-    const rightByHour = new Map(rightFrames.map(frame => [frame.hour, frame.path]));
-
-    const commonHours = Array.from(leftByHour.keys())
-        .filter(hour => rightByHour.has(hour))
-        .sort((a, b) => a - b);
-
-    const framePairs = commonHours.map(hour => ({
-        hour,
-        leftPath: leftByHour.get(hour),
-        rightPath: rightByHour.get(hour)
-    }));
-
-    if (framePairs.length === 0) {
-        throw new Error(errorMessage);
-    }
-
-    return framePairs;
+function getCurrentFramePairs() {
+    return framePairsCache[currentDomain]?.[currentCategory] || [];
 }
 
-async function discoverFramePairs(leftDirectory, rightDirectory, errorMessage) {
-    const [leftFrames, rightFrames] = await Promise.all([
-        discoverBgFramesForDirectory(leftDirectory),
-        discoverBgFramesForDirectory(rightDirectory)
-    ]);
-
-    return buildFramePairs(leftFrames, rightFrames, errorMessage);
-}
-
-async function discoverBgFrames(forceRefresh = false) {
-    const manifestFrames = await discoverManifestFramePairs('BG', forceRefresh);
-    return manifestFrames || discoverFramePairs('images/BG/US', 'images/BG/ICON', 'No overlapping BG US/ICON frame hours found');
-}
-
-async function discoverTsFrames(forceRefresh = false) {
-    const manifestFrames = await discoverManifestFramePairs('TS', forceRefresh);
-    return manifestFrames || discoverFramePairs('images/TS/Flash density', 'images/TS/Severe storm potential', 'No overlapping TS flash/severe frame hours found');
-}
-
-async function ensureBgFramesLoaded(forceRefresh = false) {
-    if (forceRefresh || bgFramePairs.length === 0) {
-        bgFramePairs = await discoverBgFrames(forceRefresh);
-    }
-    return bgFramePairs;
-}
-
-async function ensureTsFramesLoaded(forceRefresh = false) {
-    if (forceRefresh || tsFramePairs.length === 0) {
-        tsFramePairs = await discoverTsFrames(forceRefresh);
-    }
-    return tsFramePairs;
-}
-
-async function discoverAirmassFrames(forceRefresh = false) {
-    const manifestFrames = await discoverManifestFramePairs('Airmass', forceRefresh);
-    return manifestFrames || discoverFramePairs('images/Airmass/FZL', 'images/Airmass/Snow level', 'No overlapping Airmass FZL/Snow frame hours found');
-}
-
-async function ensureAirmassFramesLoaded(forceRefresh = false) {
-    if (forceRefresh || airmassFramePairs.length === 0) {
-        airmassFramePairs = await discoverAirmassFrames(forceRefresh);
-    }
-    return airmassFramePairs;
-}
-
-async function discoverTurbFrames(forceRefresh = false) {
-    const manifestFrames = await discoverManifestFramePairs('Turb', forceRefresh);
-    return manifestFrames || discoverFramePairs('images/Turb/MTW', 'images/Turb/Wind', 'No overlapping Turb MTW/Wind frame hours found');
-}
-
-async function ensureTurbFramesLoaded(forceRefresh = false) {
-    if (forceRefresh || turbFramePairs.length === 0) {
-        turbFramePairs = await discoverTurbFrames(forceRefresh);
-    }
-    return turbFramePairs;
-}
-
-function getFramePairsForCategory(category) {
-    if (category === 'BG') return bgFramePairs;
-    if (category === 'TS') return tsFramePairs;
-    if (category === 'Airmass') return airmassFramePairs;
-    if (category === 'Turb') return turbFramePairs;
-    return [];
-}
-
-function setMaxFramesForCategory(category) {
-    const framePairs = getFramePairsForCategory(category);
+function setMaxFramesForCurrentSelection() {
+    const framePairs = getCurrentFramePairs();
     maxFrames = framePairs.length > 0 ? framePairs.length : DEFAULT_MAX_FRAMES;
-
     frameSlider.max = maxFrames;
     currentFrame = Math.min(currentFrame, maxFrames);
     frameSlider.value = currentFrame;
 }
 
 function initializeElements() {
-    // Get references to DOM elements
     frameSlider = document.getElementById('frame-slider');
     leftImage = document.getElementById('left-image');
     rightImage = document.getElementById('right-image');
@@ -221,49 +128,216 @@ function initializeElements() {
     speedSlider = document.getElementById('speed-slider');
     speedDisplay = document.getElementById('speed-display');
     categoryButtons = document.querySelectorAll('.category-btn');
+    loadingOverlay = document.getElementById('loading-overlay');
+    loadingBarFill = document.getElementById('loading-bar-fill');
+    loadingStatus = document.getElementById('loading-status');
 }
 
-function getPanelExtension(panelConfig) {
-    return panelConfig.extension || 'jpeg';
+function setLoadingProgress(completedCount, totalCount) {
+    if (!loadingBarFill || !loadingStatus) {
+        return;
+    }
+
+    if (totalCount === 0) {
+        loadingBarFill.style.width = '0%';
+        loadingStatus.textContent = 'Preparing frames...';
+        return;
+    }
+
+    const percent = totalCount === 0 ? 100 : Math.round((completedCount / totalCount) * 100);
+    loadingBarFill.style.width = `${percent}%`;
+    loadingStatus.textContent = `Loading frames... ${completedCount} of ${totalCount}`;
+}
+
+function hideLoadingOverlay() {
+    document.body.classList.remove('loading');
+    if (loadingOverlay) {
+        loadingOverlay.classList.add('hidden');
+    }
+}
+
+function preloadImageSource(src) {
+    return new Promise(resolve => {
+        const img = new Image();
+        img.onload = resolve;
+        img.onerror = resolve;
+        img.src = src;
+    });
+}
+
+async function preloadAllFrames() {
+    const domainIds = Array.from(new Set(Object.values(domainHotkeys)));
+    const sources = [];
+
+    for (const domainId of domainIds) {
+        for (const category of Object.keys(imageConfig)) {
+            const framePairs = await loadCategoryFrames(domainId, category);
+            framePairs.forEach(framePair => {
+                sources.push(framePair.leftPath, framePair.rightPath);
+            });
+        }
+    }
+
+    const uniqueSources = [...new Set(sources)];
+    let completedCount = 0;
+    setLoadingProgress(completedCount, uniqueSources.length);
+
+    await Promise.all(uniqueSources.map(async src => {
+        await preloadImageSource(src);
+        completedCount += 1;
+        setLoadingProgress(completedCount, uniqueSources.length);
+    }));
+}
+
+function updateImages() {
+    const config = imageConfig[currentCategory];
+    if (!config) {
+        return;
+    }
+
+    const framePairs = getCurrentFramePairs();
+    if (framePairs.length === 0) {
+        console.warn(`No ${currentCategory} frames available for domain ${currentDomain}.`);
+        return;
+    }
+
+    const framePair = framePairs[currentFrame - 1];
+    if (!framePair) {
+        console.warn(`No ${currentCategory} frame available for domain ${currentDomain} at index ${currentFrame}.`);
+        return;
+    }
+
+    leftImage.classList.remove('error');
+    rightImage.classList.remove('error');
+
+    leftImage.src = framePair.leftPath;
+    rightImage.src = framePair.rightPath;
+    leftImage.alt = `${config.left.title} - Hour ${framePair.hour}`;
+    rightImage.alt = `${config.right.title} - Hour ${framePair.hour}`;
+}
+
+function startAnimation() {
+    if (animationInterval) {
+        return;
+    }
+
+    isPlaying = true;
+    playBtn.textContent = '⏸ Pause';
+
+    animationInterval = setInterval(() => {
+        currentFrame += 1;
+        if (currentFrame > maxFrames) {
+            currentFrame = 1;
+        }
+
+        frameSlider.value = currentFrame;
+        updateImages();
+    }, animationSpeed);
+}
+
+function stopAnimation() {
+    if (!isPlaying) {
+        return;
+    }
+
+    isPlaying = false;
+    playBtn.textContent = '▶ Play';
+
+    if (animationInterval) {
+        clearInterval(animationInterval);
+        animationInterval = null;
+    }
+}
+
+async function loadSelection(forceRefresh = false) {
+    await loadCategoryFrames(currentDomain, currentCategory, forceRefresh);
+    setMaxFramesForCurrentSelection();
+    updateImages();
+}
+
+async function switchCategory(category) {
+    if (category === currentCategory) {
+        return;
+    }
+
+    const wasPlaying = isPlaying;
+    if (wasPlaying && animationInterval) {
+        clearInterval(animationInterval);
+        animationInterval = null;
+    }
+
+    categoryButtons.forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-category') === category);
+    });
+
+    currentCategory = category;
+    await loadSelection(true);
+
+    if (wasPlaying) {
+        startAnimation();
+    }
+}
+
+async function switchDomain(domainId) {
+    if (domainId === currentDomain) {
+        return;
+    }
+
+    const wasPlaying = isPlaying;
+    if (wasPlaying && animationInterval) {
+        clearInterval(animationInterval);
+        animationInterval = null;
+    }
+
+    currentDomain = domainId;
+    await loadSelection(true);
+
+    if (wasPlaying) {
+        startAnimation();
+    }
+}
+
+async function preloadImages(domainId, category) {
+    const framePairs = await loadCategoryFrames(domainId, category);
+    framePairs.forEach(framePair => {
+        const leftImg = new Image();
+        leftImg.src = framePair.leftPath;
+
+        const rightImg = new Image();
+        rightImg.src = framePair.rightPath;
+    });
 }
 
 function setupEventListeners() {
-    // Frame slider event listener
     frameSlider.addEventListener('input', function() {
-        currentFrame = parseInt(this.value);
+        currentFrame = parseInt(this.value, 10);
         updateImages();
     });
 
-    // Play/Pause button event listener
     playBtn.addEventListener('click', function() {
-        if (!isPlaying) {
-            startAnimation();
-        } else {
+        if (isPlaying) {
             stopAnimation();
+        } else {
+            startAnimation();
         }
     });
 
-    // Speed slider event listener
     speedSlider.addEventListener('input', function() {
-        animationSpeed = parseInt(this.value);
-        speedDisplay.textContent = animationSpeed + 'ms';
-        
-        // If animation is playing, restart with new speed
+        animationSpeed = parseInt(this.value, 10);
+        speedDisplay.textContent = `${animationSpeed}ms`;
+
         if (isPlaying) {
             stopAnimation();
             startAnimation();
         }
     });
 
-    // Category button event listeners
     categoryButtons.forEach(btn => {
         btn.addEventListener('click', function() {
-            const category = this.getAttribute('data-category');
-            switchCategory(category);
+            switchCategory(this.getAttribute('data-category'));
         });
     });
 
-    // Image load event listeners for smooth transitions
     leftImage.addEventListener('load', function() {
         this.classList.add('loaded');
     });
@@ -272,7 +346,6 @@ function setupEventListeners() {
         this.classList.add('loaded');
     });
 
-    // Image error event listeners
     leftImage.addEventListener('error', function() {
         this.classList.add('error');
         console.warn(`Failed to load left image: ${this.src}`);
@@ -283,24 +356,36 @@ function setupEventListeners() {
         console.warn(`Failed to load right image: ${this.src}`);
     });
 
-    // Keyboard shortcuts
-    document.addEventListener('keydown', function(e) {
-        switch(e.key) {
+    document.addEventListener('keydown', function(event) {
+        if (event.key in domainHotkeys) {
+            switchDomain(domainHotkeys[event.key]);
+            event.preventDefault();
+            return;
+        }
+
+        const lowerKey = event.key.toLowerCase();
+        if (lowerKey in categoryHotkeys) {
+            switchCategory(categoryHotkeys[lowerKey]);
+            event.preventDefault();
+            return;
+        }
+
+        switch (event.key) {
             case 'ArrowLeft':
                 if (currentFrame > 1) {
-                    currentFrame--;
+                    currentFrame -= 1;
                     frameSlider.value = currentFrame;
                     updateImages();
                 }
-                e.preventDefault();
+                event.preventDefault();
                 break;
             case 'ArrowRight':
                 if (currentFrame < maxFrames) {
-                    currentFrame++;
+                    currentFrame += 1;
                     frameSlider.value = currentFrame;
                     updateImages();
                 }
-                e.preventDefault();
+                event.preventDefault();
                 break;
             case ' ':
                 if (isPlaying) {
@@ -308,236 +393,44 @@ function setupEventListeners() {
                 } else {
                     startAnimation();
                 }
-                e.preventDefault();
+                event.preventDefault();
                 break;
         }
     });
 }
 
-async function switchCategory(category) {
-    if (category === currentCategory) return;
-    
-    // Remember if animation was playing
-    const wasPlaying = isPlaying;
-    
-    // Temporarily stop animation if playing (but don't change button text)
-    if (isPlaying) {
-        if (animationInterval) {
-            clearInterval(animationInterval);
-            animationInterval = null;
-        }
-    }
-    
-    // Update active button
-    categoryButtons.forEach(btn => {
-        btn.classList.remove('active');
-        if (btn.getAttribute('data-category') === category) {
-            btn.classList.add('active');
-        }
-    });
-    
-    currentCategory = category;
-    await loadCategory(category);
-    updateImages();
-    
-    // Resume animation if it was playing before
-    if (wasPlaying) {
-        animationInterval = setInterval(() => {
-            currentFrame++;
-            if (currentFrame > maxFrames) {
-                currentFrame = 1; // Loop back to beginning
-            }
-            
-            frameSlider.value = currentFrame;
+document.addEventListener('DOMContentLoaded', function() {
+    initializeElements();
+    setupEventListeners();
+    setLoadingProgress(0, 0);
+    loadSelection()
+        .then(() => {
             updateImages();
-        }, animationSpeed);
-    }
-}
-
-async function loadCategory(category) {
-    const config = imageConfig[category];
-    if (!config) {
-        console.error(`Category ${category} not found in configuration`);
-        return;
-    }
-
-    if (category === 'BG') {
-        try {
-            await ensureBgFramesLoaded(true);
-        } catch (error) {
-            console.warn('Could not dynamically discover BG files, using existing frame count.', error);
-            bgFramePairs = [];
-        }
-    } else if (category === 'TS') {
-        try {
-            await ensureTsFramesLoaded(true);
-        } catch (error) {
-            console.warn('Could not dynamically discover TS files, using existing frame count.', error);
-            tsFramePairs = [];
-        }
-    } else if (category === 'Airmass') {
-        try {
-            await ensureAirmassFramesLoaded(true);
-        } catch (error) {
-            console.warn('Could not dynamically discover Airmass FZL/Snow files, using existing frame count.', error);
-            airmassFramePairs = [];
-        }
-    } else if (category === 'Turb') {
-        try {
-            await ensureTurbFramesLoaded(true);
-        } catch (error) {
-            console.warn('Could not dynamically discover Turb MTW/Wind files, using existing frame count.', error);
-            turbFramePairs = [];
-        }
-    }
-    
-    setMaxFramesForCategory(category);
-    
-    // Keep current frame position - don't reset to frame 1
-    // Just ensure the slider reflects the current frame
-    frameSlider.value = currentFrame;
-}
-
-function updateImages() {
-    const config = imageConfig[currentCategory];
-    if (!config) return;
-
-    const framePairs = getFramePairsForCategory(currentCategory);
-    if (framePairs.length > 0) {
-        const framePair = framePairs[currentFrame - 1];
-        if (!framePair) {
-            console.warn(`No ${currentCategory} frame available for index ${currentFrame}.`);
-            return;
-        }
-
-        leftImage.classList.remove('error');
-        rightImage.classList.remove('error');
-
-        leftImage.src = framePair.leftPath;
-        rightImage.src = framePair.rightPath;
-        leftImage.alt = `${config.left.title} - Hour ${framePair.hour}`;
-        rightImage.alt = `${config.right.title} - Hour ${framePair.hour}`;
-        return;
-    }
-    
-    const frameNumber = currentFrame.toString().padStart(3, '0');
-    
-    // Just remove error class, keep loaded class to prevent white flash
-    leftImage.classList.remove('error');
-    rightImage.classList.remove('error');
-    
-    // Update image sources
-    const leftExt = getPanelExtension(config.left);
-    const rightExt = getPanelExtension(config.right);
-    leftImage.src = `images/${currentCategory}/${config.left.folder}/${config.left.prefix}${frameNumber}.${leftExt}`;
-    rightImage.src = `images/${currentCategory}/${config.right.folder}/${config.right.prefix}${frameNumber}.${rightExt}`;
-    
-    leftImage.alt = `${config.left.title} - Frame ${currentFrame}`;
-    rightImage.alt = `${config.right.title} - Frame ${currentFrame}`;
-}
-
-// Frame counter removed - no longer needed
-
-function startAnimation() {
-    if (isPlaying) return;
-    
-    isPlaying = true;
-    playBtn.textContent = '⏸ Pause';
-    
-    animationInterval = setInterval(() => {
-        currentFrame++;
-        if (currentFrame > maxFrames) {
-            currentFrame = 1; // Loop back to beginning
-        }
-        
-        frameSlider.value = currentFrame;
-        updateImages();
-    }, animationSpeed);
-}
-
-function stopAnimation() {
-    if (!isPlaying) return;
-    
-    isPlaying = false;
-    playBtn.textContent = '▶ Play';
-    
-    if (animationInterval) {
-        clearInterval(animationInterval);
-        animationInterval = null;
-    }
-}
-
-// Utility function to preload images for smoother animation
-function preloadImages(category) {
-    const config = imageConfig[category];
-    if (!config) return;
-
-    const framePairs = getFramePairsForCategory(category);
-    if (framePairs.length > 0) {
-        framePairs.forEach(framePair => {
-            const leftImg = new Image();
-            leftImg.src = framePair.leftPath;
-
-            const rightImg = new Image();
-            rightImg.src = framePair.rightPath;
-        });
-        return;
-    }
-    
-    for (let i = 1; i <= DEFAULT_MAX_FRAMES; i++) {
-        const frameNumber = i.toString().padStart(3, '0');
-        const leftExt = getPanelExtension(config.left);
-        const rightExt = getPanelExtension(config.right);
-        
-        // Preload left images
-        const leftImg = new Image();
-        leftImg.src = `images/${category}/${config.left.folder}/${config.left.prefix}${frameNumber}.${leftExt}`;
-        
-        // Preload right images
-        const rightImg = new Image();
-        rightImg.src = `images/${category}/${config.right.folder}/${config.right.prefix}${frameNumber}.${rightExt}`;
-    }
-}
-
-// Preload images for better performance
-window.addEventListener('load', async function() {
-    await Promise.all([
-        ensureBgFramesLoaded()
-            .then(() => {
-                setMaxFramesForCategory('BG');
-            })
-            .catch(error => {
-                console.warn('Could not preload BG frames dynamically:', error);
-            }),
-        ensureTsFramesLoaded().catch(error => {
-            console.warn('Could not preload TS frames dynamically:', error);
-        }),
-        ensureAirmassFramesLoaded().catch(error => {
-            console.warn('Could not preload Airmass frames dynamically:', error);
-        }),
-        ensureTurbFramesLoaded().catch(error => {
-            console.warn('Could not preload Turb frames dynamically:', error);
         })
-    ]);
-
-    // Preload images for all categories
-    Object.keys(imageConfig).forEach(category => {
-        preloadImages(category);
-    });
+        .catch(error => {
+            console.warn('Failed to initialize category data:', error);
+        });
 });
 
-// Handle window resize for responsive behavior
+window.addEventListener('load', function() {
+    preloadAllFrames()
+        .catch(error => {
+            console.warn('Failed to preload one or more domain images:', error);
+        })
+        .finally(() => {
+            hideLoadingOverlay();
+        });
+});
+
 window.addEventListener('resize', function() {
-    // Force image refresh to ensure proper scaling
     updateImages();
 });
 
-// Export functions for potential external use
 window.AnimationController = {
     switchCategory,
     startAnimation,
     stopAnimation,
-    setFrame: function(frame) {
+    setFrame(frame) {
         if (frame >= 1 && frame <= maxFrames) {
             currentFrame = frame;
             frameSlider.value = currentFrame;
@@ -546,5 +439,6 @@ window.AnimationController = {
     },
     getCurrentFrame: () => currentFrame,
     getCurrentCategory: () => currentCategory,
+    getCurrentDomain: () => currentDomain,
     isAnimationPlaying: () => isPlaying
 };

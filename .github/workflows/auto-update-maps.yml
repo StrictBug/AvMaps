@@ -1,21 +1,47 @@
-name: Auto-update aviation maps
+name: Build and deploy aviation maps
 
 on:
   schedule:
     - cron: '15 * * * *'
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/auto-update-maps.yml
+      - .gitignore
+      - favicon.svg
+      - generate_maps.py
+      - index.html
+      - requirements.txt
+      - script.js
+      - styles.css
+      - scripts/**
+      - geo files/**
   workflow_dispatch:
+    inputs:
+      force:
+        description: Force a rebuild and deploy even if the latest run is already published.
+        required: false
+        default: false
+        type: boolean
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
 
 concurrency:
-  group: avmaps-auto-update
+  group: avmaps-pages-deploy
   cancel-in-progress: false
 
 jobs:
-  update-maps:
+  build-site:
     runs-on: ubuntu-latest
     timeout-minutes: 180
+
+    outputs:
+      should_deploy: ${{ steps.generate.outputs.should_deploy }}
+      reason: ${{ steps.generate.outputs.reason }}
 
     steps:
       - name: Check out repository
@@ -37,19 +63,53 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Check model readiness and update maps
+      - name: Check model readiness and generate site
+        id: generate
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          FORCE_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.force || 'false' }}
         run: |
-          python scripts/auto_update_maps.py --model both --start-hour 9 --end-hour 35
-
-      - name: Commit and push updates
-        run: |
-          if [ -z "$(git status --porcelain)" ]; then
-            echo "No map changes to commit."
-            exit 0
+          FORCE_FLAG=""
+          if [ "$EVENT_NAME" = "push" ] || [ "$FORCE_INPUT" = "true" ]; then
+            FORCE_FLAG="--force"
           fi
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "Auto-update maps for $(date -u '+%Y-%m-%d %H:%MZ')"
-          git push origin main
+          python scripts/auto_update_maps.py --model both --start-hour 9 --end-hour 35 --github-output "$GITHUB_OUTPUT" $FORCE_FLAG
+
+      - name: Report skipped deploy
+        if: steps.generate.outputs.should_deploy != 'true'
+        run: |
+          echo "Skipping Pages deploy: ${{ steps.generate.outputs.reason }}"
+
+      - name: Configure Pages
+        if: steps.generate.outputs.should_deploy == 'true'
+        uses: actions/configure-pages@v5
+
+      - name: Assemble Pages artifact
+        if: steps.generate.outputs.should_deploy == 'true'
+        run: |
+          rm -rf _site
+          mkdir -p _site
+          cp index.html script.js styles.css favicon.svg _site/
+          cp -R images _site/
+
+      - name: Upload Pages artifact
+        if: steps.generate.outputs.should_deploy == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy-pages:
+    needs: build-site
+    if: needs.build-site.outputs.should_deploy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

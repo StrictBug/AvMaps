@@ -7,7 +7,7 @@
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="stylesheet" href="styles.css">
 </head>
-<body>
+<body class="loading">
     <header>
         <div class="title-section">
             <h1>Aviation map viewer</h1>
@@ -34,6 +34,16 @@
             </div>
         </div>
     </main>
+
+    <div class="loading-overlay" id="loading-overlay" aria-live="polite">
+        <div class="loading-card">
+            <p class="loading-title">Loading maps</p>
+            <div class="loading-bar-track">
+                <div class="loading-bar-fill" id="loading-bar-fill"></div>
+            </div>
+            <p class="loading-status" id="loading-status">Preparing frames...</p>
+        </div>
+    </div>
 
     <div class="controls">
             <div class="slider-container">
