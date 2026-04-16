@@ -75,6 +75,14 @@ REMOVABLE_IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
 TAF_LABEL_DX = -0.12
 TAF_LABEL_DY = 0.12
 
+OUTPUT_IMAGE_EXT = 'jpg'
+OUTPUT_IMAGE_FORMAT = 'jpeg'
+OUTPUT_JPEG_QUALITY = 72
+BASE_FIGURE_WIDTH_INCHES = 12
+BASE_FIGURE_HEIGHT_INCHES = 10
+OUTPUT_MAX_WIDTH_PX = 1280
+OUTPUT_DPI = OUTPUT_MAX_WIDTH_PX / BASE_FIGURE_WIDTH_INCHES
+
 # On-disk cache for downloaded ICON GRIB2 files.  Each entry is the raw
 # decompressed bytes keyed by run_stamp + folder + filename so that repeated
 # runs (e.g. a single-frame re-render) skip the network entirely.
@@ -100,6 +108,20 @@ def safe_remove_file(path):
         os.remove(path)
     except OSError:
         pass
+
+
+def save_output_figure(fig, filepath):
+    fig.savefig(
+        filepath,
+        dpi=OUTPUT_DPI,
+        bbox_inches='tight',
+        format=OUTPUT_IMAGE_FORMAT,
+        pil_kwargs={
+            'quality': OUTPUT_JPEG_QUALITY,
+            'optimize': True,
+            'progressive': True,
+        },
+    )
 
 
 def publish_generated_frames(output_dir, generated_files, temp_dir):
@@ -1241,6 +1263,25 @@ def get_latest_icon_run(target_time=None):
     }
 
 
+def evict_stale_icon_cache(current_run_stamp):
+    """Remove all cache entries that do not belong to current_run_stamp."""
+    if not os.path.isdir(ICON_CACHE_DIR):
+        return
+    removed = 0
+    freed_bytes = 0
+    for entry in os.listdir(ICON_CACHE_DIR):
+        if not entry.startswith(current_run_stamp + '_'):
+            file_path = os.path.join(ICON_CACHE_DIR, entry)
+            try:
+                freed_bytes += os.path.getsize(file_path)
+                os.remove(file_path)
+                removed += 1
+            except OSError:
+                pass
+    if removed:
+        print(f'Evicted {removed} stale ICON cache entries ({freed_bytes / 1024 / 1024:.1f} MB freed)')
+
+
 def _download_icon_grib2(icon_run, folder, filename):
     """Download and bz2-decompress one ICON GRIB2 file, using a local cache."""
     cache_path = os.path.join(ICON_CACHE_DIR, f"{icon_run['run_stamp']}_{folder}_{filename}")
@@ -1456,7 +1497,7 @@ def get_icon_data(forecast_hour, icon_run, remap_state, prev_tp_values=None):
 
 # Function to plot the map
 def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg', domain_id='AU'):
-    fig = plt.figure(figsize=(12, 10))
+    fig = plt.figure(figsize=(BASE_FIGURE_WIDTH_INCHES, BASE_FIGURE_HEIGHT_INCHES))
     ax = fig.add_subplot(1, 1, 1, projection=ccrs.PlateCarree())
 
     ts_flash_profile = layer_profile == 'ts_flash'
@@ -2604,11 +2645,11 @@ def generate_gfs_bg_frames(
             print('Using raw hourly GFS 0.25 model fields')
 
             # Plot map
-            filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.png'
+            filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.{OUTPUT_IMAGE_EXT}'
             for domain_id in domain_ids:
                 fig = plot_map(data, init_time, forecast_hour, model_name='GFS', domain_id=domain_id)
                 temp_filepath = os.path.join(temp_dirs[domain_id], filename)
-                fig.savefig(temp_filepath, dpi=150, bbox_inches='tight')
+                save_output_figure(fig, temp_filepath)
                 plt.close(fig)
                 generated_files_by_domain[domain_id].append(filename)
                 print(f'BG map staged for {domain_id} at {temp_filepath}')
@@ -2661,11 +2702,11 @@ def generate_gfs_ts_flash_frames(
             last_generated_hour = forecast_hour
             print('Using raw hourly GFS convective precipitation, Total Totals, and geometric vertical velocity fields')
 
-            filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.png'
+            filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.{OUTPUT_IMAGE_EXT}'
             for domain_id in domain_ids:
                 fig = plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='ts_flash', domain_id=domain_id)
                 temp_filepath = os.path.join(temp_dirs[domain_id], filename)
-                fig.savefig(temp_filepath, dpi=150, bbox_inches='tight')
+                save_output_figure(fig, temp_filepath)
                 plt.close(fig)
                 generated_files_by_domain[domain_id].append(filename)
                 print(f'TS flash-density map staged for {domain_id} at {temp_filepath}')
@@ -2718,11 +2759,11 @@ def generate_gfs_ts_severe_frames(
             last_generated_hour = forecast_hour
             print('Using raw hourly GFS convective precipitation, Total Totals, and geometric vertical velocity fields')
 
-            filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.png'
+            filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.{OUTPUT_IMAGE_EXT}'
             for domain_id in domain_ids:
                 fig = plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='ts_severe', domain_id=domain_id)
                 temp_filepath = os.path.join(temp_dirs[domain_id], filename)
-                fig.savefig(temp_filepath, dpi=150, bbox_inches='tight')
+                save_output_figure(fig, temp_filepath)
                 plt.close(fig)
                 generated_files_by_domain[domain_id].append(filename)
                 print(f'TS severe-potential map staged for {domain_id} at {temp_filepath}')
@@ -2776,11 +2817,11 @@ def generate_gfs_airmass_fzl_frames(
             last_generated_hour = forecast_hour
             print('Using raw hourly GFS convective precipitation and airmass fields')
 
-            filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.png'
+            filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.{OUTPUT_IMAGE_EXT}'
             for domain_id in domain_ids:
                 fig = plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='airmass_fzl', domain_id=domain_id)
                 temp_filepath = os.path.join(temp_dirs[domain_id], filename)
-                fig.savefig(temp_filepath, dpi=150, bbox_inches='tight')
+                save_output_figure(fig, temp_filepath)
                 plt.close(fig)
                 generated_files_by_domain[domain_id].append(filename)
                 print(f'Airmass/FZL map staged for {domain_id} at {temp_filepath}')
@@ -2828,11 +2869,11 @@ def generate_gfs_airmass_snow_frames(
             )
             print('Using raw hourly GFS precipitation and airmass fields')
 
-            filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.png'
+            filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.{OUTPUT_IMAGE_EXT}'
             for domain_id in domain_ids:
                 fig = plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='airmass_snow', domain_id=domain_id)
                 temp_filepath = os.path.join(temp_dirs[domain_id], filename)
-                fig.savefig(temp_filepath, dpi=150, bbox_inches='tight')
+                save_output_figure(fig, temp_filepath)
                 plt.close(fig)
                 generated_files_by_domain[domain_id].append(filename)
                 print(f'Airmass/Snow level map staged for {domain_id} at {temp_filepath}')
@@ -2917,21 +2958,21 @@ def _generate_gfs_turb_frames_internal(
             print('Using raw hourly GFS 0.25 model fields for Turb maps')
 
             if include_mtw:
-                mtw_filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.png'
+                mtw_filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.{OUTPUT_IMAGE_EXT}'
                 for domain_id in domain_ids:
                     mtw_fig = plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='turb_mtw', domain_id=domain_id)
                     mtw_temp_filepath = os.path.join(mtw_temp_dirs[domain_id], mtw_filename)
-                    mtw_fig.savefig(mtw_temp_filepath, dpi=150, bbox_inches='tight')
+                    save_output_figure(mtw_fig, mtw_temp_filepath)
                     plt.close(mtw_fig)
                     mtw_generated_files[domain_id].append(mtw_filename)
                     print(f'Turb/MTW map staged for {domain_id} at {mtw_temp_filepath}')
 
             if include_wind:
-                wind_filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.png'
+                wind_filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.{OUTPUT_IMAGE_EXT}'
                 for domain_id in domain_ids:
                     wind_fig = plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='turb_wind', domain_id=domain_id)
                     wind_temp_filepath = os.path.join(wind_temp_dirs[domain_id], wind_filename)
-                    wind_fig.savefig(wind_temp_filepath, dpi=150, bbox_inches='tight')
+                    save_output_figure(wind_fig, wind_temp_filepath)
                     plt.close(wind_fig)
                     wind_generated_files[domain_id].append(wind_filename)
                     print(f'Turb/Wind map staged for {domain_id} at {wind_temp_filepath}')
@@ -3036,6 +3077,7 @@ def generate_icon_bg_frames(
     if icon_run is None:
         icon_run = get_latest_icon_run(target_time=preferred_run_time)
     init_time = icon_run['init_time']
+    evict_stale_icon_cache(icon_run['run_stamp'])
     if remap_state is None:
         remap_state = _load_icon_static_remap(icon_run)
 
@@ -3064,11 +3106,11 @@ def generate_icon_bg_frames(
             last_generated_hour = forecast_hour
             print('Using raw hourly ICON model fields')
 
-            filename = f'ICON_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.png'
+            filename = f'ICON_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.{OUTPUT_IMAGE_EXT}'
             for domain_id in domain_ids:
                 fig = plot_map(data, init_time, forecast_hour, model_name='ICON', domain_id=domain_id)
                 temp_filepath = os.path.join(temp_dirs[domain_id], filename)
-                fig.savefig(temp_filepath, dpi=150, bbox_inches='tight')
+                save_output_figure(fig, temp_filepath)
                 plt.close(fig)
                 generated_files_by_domain[domain_id].append(filename)
                 print(f'ICON map staged for {domain_id} at {temp_filepath}')
@@ -3096,6 +3138,7 @@ def generate_all_layers_atomically(forecast_hours, model='both', domain_ids=None
     if model in ('icon', 'both'):
         preferred_time = gfs_init_time if model == 'both' else None
         icon_run = get_latest_icon_run(target_time=preferred_time)
+        evict_stale_icon_cache(icon_run['run_stamp'])
         icon_remap_state = _load_icon_static_remap(icon_run)
         print(f"Locked ICON run for atomic publish: {icon_run['init_time'].strftime('%Y-%m-%d %H%MZ')}")
 

@@ -35,12 +35,15 @@ let currentCategory = 'BG';
 let currentDomain = 'AU';
 let currentFrame = 1;
 const DEFAULT_MAX_FRAMES = 40;
+const DECODE_WINDOW_RADIUS = 15;
 let maxFrames = DEFAULT_MAX_FRAMES;
 let isPlaying = false;
 let animationInterval = null;
 let animationSpeed = 500;
 let frameManifest = null;
 const framePairsCache = {};
+const decodedImageObjects = new Map();
+const pendingDecodePromises = new Map();
 
 let frameSlider;
 let leftImage;
@@ -169,6 +172,93 @@ function preloadImageSource(src) {
     });
 }
 
+function decodeImageSource(src) {
+    if (!src) {
+        return Promise.resolve();
+    }
+
+    if (decodedImageObjects.has(src)) {
+        return Promise.resolve();
+    }
+
+    if (pendingDecodePromises.has(src)) {
+        return pendingDecodePromises.get(src);
+    }
+
+    const decodeImage = new Image();
+    decodeImage.src = src;
+
+    const decodePromise = (typeof decodeImage.decode === 'function'
+        ? decodeImage.decode().catch(() => preloadImageSource(src))
+        : preloadImageSource(src)
+    ).then(() => {
+        decodedImageObjects.set(src, decodeImage);
+        pendingDecodePromises.delete(src);
+    }).catch(() => {
+        pendingDecodePromises.delete(src);
+    });
+
+    pendingDecodePromises.set(src, decodePromise);
+    return decodePromise;
+}
+
+function getWrappedFrameIndex(index, frameCount) {
+    if (frameCount <= 0) {
+        return 1;
+    }
+
+    let wrapped = index;
+    while (wrapped < 1) {
+        wrapped += frameCount;
+    }
+    while (wrapped > frameCount) {
+        wrapped -= frameCount;
+    }
+    return wrapped;
+}
+
+function collectDecodeWindowSourcesForAllStreams(centerFrame) {
+    const targetSources = new Set();
+    const domainIds = frameManifest?.domainOrder || Object.keys(framePairsCache);
+
+    domainIds.forEach(domainId => {
+        Object.keys(imageConfig).forEach(category => {
+            const framePairs = framePairsCache[domainId]?.[category] || [];
+            const frameCount = framePairs.length;
+            if (frameCount === 0) {
+                return;
+            }
+
+            for (let offset = -DECODE_WINDOW_RADIUS; offset <= DECODE_WINDOW_RADIUS; offset += 1) {
+                const frameIndex = getWrappedFrameIndex(centerFrame + offset, frameCount);
+                const framePair = framePairs[frameIndex - 1];
+                if (!framePair) {
+                    continue;
+                }
+
+                targetSources.add(framePair.leftPath);
+                targetSources.add(framePair.rightPath);
+            }
+        });
+    });
+
+    return targetSources;
+}
+
+function updateDecodeWindowsForAllStreams(centerFrame) {
+    const targetSources = collectDecodeWindowSourcesForAllStreams(centerFrame);
+
+    targetSources.forEach(src => {
+        decodeImageSource(src);
+    });
+
+    Array.from(decodedImageObjects.keys()).forEach(src => {
+        if (!targetSources.has(src)) {
+            decodedImageObjects.delete(src);
+        }
+    });
+}
+
 async function preloadAllFrames() {
     const domainIds = Array.from(new Set(Object.values(domainHotkeys)));
     const sources = [];
@@ -191,6 +281,8 @@ async function preloadAllFrames() {
         completedCount += 1;
         setLoadingProgress(completedCount, uniqueSources.length);
     }));
+
+    updateDecodeWindowsForAllStreams(currentFrame);
 }
 
 function updateImages() {
@@ -218,6 +310,8 @@ function updateImages() {
     rightImage.src = framePair.rightPath;
     leftImage.alt = `${config.left.title} - Hour ${framePair.hour}`;
     rightImage.alt = `${config.right.title} - Hour ${framePair.hour}`;
+
+    updateDecodeWindowsForAllStreams(currentFrame);
 }
 
 function startAnimation() {
