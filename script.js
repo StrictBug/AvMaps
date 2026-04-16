@@ -55,6 +55,9 @@ let categoryButtons;
 let loadingOverlay;
 let loadingBarFill;
 let loadingStatus;
+let infoBtn;
+let infoOverlay;
+let infoCloseBtn;
 
 function ensureDomainCache(domainId) {
     if (!framePairsCache[domainId]) {
@@ -138,6 +141,24 @@ function initializeElements() {
     loadingOverlay = document.getElementById('loading-overlay');
     loadingBarFill = document.getElementById('loading-bar-fill');
     loadingStatus = document.getElementById('loading-status');
+    infoBtn = document.getElementById('info-btn');
+    infoOverlay = document.getElementById('info-overlay');
+    infoCloseBtn = document.getElementById('info-close-btn');
+}
+
+function isInfoModalOpen() {
+    return infoOverlay && !infoOverlay.classList.contains('hidden');
+}
+
+function openInfoModal() {
+    stopAnimation();
+    infoOverlay.classList.remove('hidden');
+    infoOverlay.setAttribute('aria-hidden', 'false');
+}
+
+function closeInfoModal() {
+    infoOverlay.classList.add('hidden');
+    infoOverlay.setAttribute('aria-hidden', 'true');
 }
 
 function setLoadingProgress(completedCount, totalCount) {
@@ -436,6 +457,20 @@ function setupEventListeners() {
         });
     });
 
+    infoBtn.addEventListener('click', function() {
+        openInfoModal();
+    });
+
+    infoCloseBtn.addEventListener('click', function() {
+        closeInfoModal();
+    });
+
+    infoOverlay.addEventListener('click', function(event) {
+        if (event.target === infoOverlay) {
+            closeInfoModal();
+        }
+    });
+
     leftImage.addEventListener('load', function() {
         this.classList.add('loaded');
     });
@@ -455,6 +490,16 @@ function setupEventListeners() {
     });
 
     document.addEventListener('keydown', function(event) {
+        if (isInfoModalOpen()) {
+            if (event.key === 'Escape') {
+                closeInfoModal();
+            }
+            if (event.key === 'Escape' || event.key === ' ' || event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key in domainHotkeys || event.key.toLowerCase() in categoryHotkeys) {
+                event.preventDefault();
+            }
+            return;
+        }
+
         if (event.key in domainHotkeys) {
             switchDomain(domainHotkeys[event.key]);
             event.preventDefault();
