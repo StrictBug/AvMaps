@@ -543,6 +543,255 @@ def calculate_total_totals(data):
     return t_850_c + td_850_c - 2.0 * t_500_c
 
 
+def _interp_level_to_pressure(field_3d, p_env_pa, target_p_pa):
+    """Vectorized linear interpolation of a 3D field to a 2D target pressure surface.
+
+    Parameters
+    ----------
+    field_3d    : ndarray (n_levels, nlat, nlon) — values at each pressure level
+    p_env_pa    : 1D array (n_levels,)           — pressure in Pa, surface-first (descending)
+    target_p_pa : ndarray (nlat, nlon)           — target pressure in Pa per grid point
+
+    Returns
+    -------
+    result : ndarray (nlat, nlon) — NaN where target falls outside the profile
+    """
+    result = np.full(target_p_pa.shape, np.nan, dtype=float)
+    for k in range(len(p_env_pa) - 1):
+        p_lo = p_env_pa[k]       # higher pressure (lower altitude)
+        p_hi = p_env_pa[k + 1]   # lower pressure  (higher altitude)
+        in_bracket = (target_p_pa <= p_lo) & (target_p_pa >= p_hi)
+        active = in_bracket & np.isnan(result)
+        if not np.any(active):
+            continue
+        frac = np.where(active, (target_p_pa - p_lo) / (p_hi - p_lo + 1e-10), 0.0)
+        interp = field_3d[k] + frac * (field_3d[k + 1] - field_3d[k])
+        result = np.where(active, interp, result)
+    return result
+
+
+def _find_isotherm_pressure(t_env_c, p_env_pa, target_temp_c):
+    """Vectorized: find the pressure (Pa) of the first upward crossing of target_temp_c.
+
+    Parameters
+    ----------
+    t_env_c     : ndarray (n_levels, nlat, nlon) — env temperature in °C, surface-first
+    p_env_pa    : 1D array (n_levels,)           — pressure in Pa, surface-first (descending)
+    target_temp_c : float                        — isotherm temperature (e.g. -20)
+
+    Returns
+    -------
+    isotherm_p_pa : ndarray (nlat, nlon) — NaN where isotherm not found in profile
+    """
+    result = np.full(t_env_c.shape[1:], np.nan, dtype=float)
+    for k in range(len(p_env_pa) - 1):
+        t_lo = t_env_c[k]      # warmer (surface side)
+        t_hi = t_env_c[k + 1]  # colder (upper side)
+        crossing = (t_lo >= target_temp_c) & (t_hi <= target_temp_c)
+        active = crossing & np.isnan(result) & np.isfinite(t_lo) & np.isfinite(t_hi)
+        if not np.any(active):
+            continue
+        dt = t_hi - t_lo
+        frac = np.where(active, (target_temp_c - t_lo) / np.where(np.abs(dt) > 1e-6, dt, np.nan), 0.0)
+        interp_p = p_env_pa[k] + frac * (p_env_pa[k + 1] - p_env_pa[k])
+        result = np.where(active, interp_p, result)
+    return result
+
+
+# Physical constants for parcel lift
+_Rd   = 287.05   # J kg-1 K-1  dry air gas constant
+_Rv   = 461.5    # J kg-1 K-1  water vapour gas constant
+_cpd  = 1005.7   # J kg-1 K-1  specific heat of dry air at constant pressure
+_Lv   = 2.501e6  # J kg-1      latent heat of vaporisation (0°C reference)
+_kappa = _Rd / _cpd  # Poisson exponent ≈ 0.286
+
+
+def _saturation_mixing_ratio(t_k, p_pa):
+    """Saturation mixing ratio (kg/kg) from temperature (K) and pressure (Pa)."""
+    t_c = t_k - 273.15
+    es_pa = 611.2 * np.exp((17.67 * t_c) / (t_c + 243.5))  # Buck equation, Pa
+    es_pa = np.minimum(es_pa, p_pa - 1.0)
+    return (_Rd / _Rv) * es_pa / (p_pa - es_pa)
+
+
+def _moist_adiabatic_lapse_rate(t_k, p_pa):
+    """Saturated adiabatic lapse rate dT/dp (K/Pa) — positive = warms as p increases.
+
+    Derived from the pseudoadiabatic first-law balance:
+        dT/dp = (Rd*T + Lv*ws) / (p * (cpd + Lv²*ws / (Rv*T²)))
+    """
+    ws = _saturation_mixing_ratio(t_k, p_pa)
+    numer = _Rd * t_k + _Lv * ws
+    denom = _cpd + (_Lv ** 2 * ws) / (_Rv * t_k ** 2)
+    return numer / (denom * p_pa)
+
+
+def calculate_min_lifted_index_minus20(data):
+    """Return the minimum LI-20 across parcels lifted from surface and each
+    isobaric level from 1000 hPa to 600 hPa.
+
+    LI-20 = T_env(P_-20) - T_parcel(P_-20), where P_-20 is the pressure of
+    the environmental -20°C isotherm.  Negative values indicate a parcel
+    warmer than the environment at that level — convective instability.
+
+    Algorithm (fully vectorized — no Python loop over grid columns):
+      1. Analytically compute the LCL pressure and temperature for each
+         starting level using Bolton (1980) formulae.
+      2. Dry-adiabatic lift from the starting level to each model level below
+         the LCL using potential-temperature conservation:
+             T_parcel = T_start * (P / P_start)^kappa
+      3. Moist-adiabatic lift above the LCL: step through each model level
+         applying the saturated lapse rate dT/dp to the *full 2D grid* in one
+         NumPy operation per level.
+      4. Interpolate T_parcel and T_env to the -20°C isotherm pressure, then
+         compute LI-20 and take the element-wise minimum across all starting
+         levels.
+
+    Returns a 2D ndarray (nlat, nlon) in °C.  NaN where the -20°C isotherm is
+    not found within the column (e.g. very cold surface environments).
+    """
+    # -----------------------------------------------------------------------
+    # 1. Build the environment profile
+    #    - Full profile (surface → 300 hPa): used to locate the -20°C isotherm
+    #    - Starting levels (surface → 600 hPa): the levels from which parcels
+    #      are lifted (per the definition of min-LI-20)
+    # -----------------------------------------------------------------------
+    # Levels used for parcel starting points (surface → 600 hPa)
+    start_levels_pa = [100000, 97500, 95000, 92500, 90000, 85000,
+                       80000, 75000, 70000, 65000, 60000]
+    # Extended levels above 600 hPa — needed to capture the -20°C isotherm,
+    # which in Australia typically lies near 450–550 hPa.  These levels are
+    # already fetched by include_ts_fields (400, 300, 250 hPa) and the base
+    # fetch (500 hPa).
+    upper_levels_pa = [50000, 40000, 30000]
+
+    temp_iso = get_time_index(data['Temperature_isobaric'])
+    rh_iso   = get_time_index(data['Relative_humidity_isobaric'])
+
+    def _stack_levels(levels):
+        t_stack, td_stack, p_stack = [], [], []
+        for p_pa in levels:
+            t_lev  = temp_iso.sel(isobaric=p_pa, method='nearest')
+            rh_lev = rh_iso.sel(isobaric=p_pa, method='nearest')
+            t_stack.append(t_lev.values)
+            td_stack.append(dewpoint_from_temperature_and_rh(t_lev.values, rh_lev.values))
+            p_stack.append(float(t_lev['isobaric'].values))
+        return t_stack, td_stack, p_stack
+
+    t2m_k  = get_time_index(data['Temperature_height_above_ground'].sel(height_above_ground3=2)).values
+    td2m_c = (get_time_index(data['Dewpoint_temperature_height_above_ground'].sel(height_above_ground4=2)).values
+              - 273.15)
+
+    t_start_stack, td_start_stack, p_start_stack = _stack_levels(start_levels_pa)
+    t_upper_stack, td_upper_stack, p_upper_stack = _stack_levels(upper_levels_pa)
+
+    # Full environment profile: surface → 300 hPa (surface-first, descending pressure)
+    p_env_pa = np.array([101325.0] + p_start_stack + p_upper_stack)
+    t_env_k  = np.array([t2m_k]   + t_start_stack  + t_upper_stack)
+    td_env_c = np.array([td2m_c]  + td_start_stack  + td_upper_stack)
+    t_env_c  = t_env_k - 273.15
+
+    # Number of starting levels (surface + start_levels_pa)
+    n_start_lev = 1 + len(start_levels_pa)
+    nlat, nlon  = t2m_k.shape
+
+    # -----------------------------------------------------------------------
+    # 2. Find the -20°C isotherm pressure in the environment
+    # -----------------------------------------------------------------------
+    isotherm_p_pa = _find_isotherm_pressure(t_env_c, p_env_pa, -20.0)
+    # T_env at the -20°C level (≈ -20 by construction; interpolated exactly)
+    t_env_at_isotherm = _interp_level_to_pressure(t_env_c, p_env_pa, isotherm_p_pa)
+
+    # -----------------------------------------------------------------------
+    # 3. Lift parcels from each starting level and compute LI-20
+    # -----------------------------------------------------------------------
+    min_li20 = np.full((nlat, nlon), np.nan)
+
+    for start_idx in range(n_start_lev):
+        p_start  = p_env_pa[start_idx]                  # scalar Pa
+        t_start_k  = t_env_k[start_idx]                 # (nlat, nlon)
+        td_start_c = td_env_c[start_idx]                # (nlat, nlon)
+
+        # Only meaningful where the starting level is below the isotherm
+        valid = np.isfinite(isotherm_p_pa) & (p_start > isotherm_p_pa)
+        if not np.any(valid):
+            continue
+
+        # --- Analytical LCL (Bolton 1980) ---
+        # LCL temperature
+        t_lcl_k = 1.0 / (
+            1.0 / np.maximum(td_start_c + 273.15 - 56.0, 1e-3)
+            + np.log(np.maximum(t_start_k / np.maximum(td_start_c + 273.15, 1e-3), 1.0)) / 800.0
+        ) + 56.0
+        # LCL pressure via Poisson relation (potential temperature conserved dry-adiabatically)
+        p_lcl_pa = p_start * np.power(np.maximum(t_lcl_k / t_start_k, 1e-6), 1.0 / _kappa)
+
+        # --- Build parcel temperature profile over all levels above start ---
+        # Phase 1: dry adiabatic — θ conservation
+        #   T_parcel(P) = T_start * (P / p_start)^kappa   for P >= P_LCL
+        # Phase 2: moist adiabatic — integrate dT/dp upward level by level
+        #   T_parcel(k+1) = T_parcel(k) + dT/dp * (p[k+1] - p[k])
+
+        # Initialise parcel temperature array over levels start_idx…n_lev-1
+        levels_above = p_env_pa[start_idx:]   # (n_above,)
+        n_above = len(levels_above)
+
+        # Dry adiabat for all levels (used below LCL)
+        t_dry_k = t_start_k[np.newaxis, :, :] * np.power(
+            (levels_above / p_start)[:, np.newaxis, np.newaxis], _kappa
+        )  # (n_above, nlat, nlon)
+
+        # Moist adiabat: step up from the starting level
+        t_parcel_k = np.copy(t_dry_k)  # initialise with dry profile
+        # At the starting level the parcel = environment
+        t_parcel_k[0] = t_start_k
+
+        for k in range(n_above - 1):
+            p_k   = levels_above[k]
+            p_k1  = levels_above[k + 1]
+            dp    = p_k1 - p_k   # negative (ascending)
+
+            # Above LCL: use moist adiabat; at or below: keep dry adiabat value
+            above_lcl = p_k <= p_lcl_pa  # (nlat, nlon)
+
+            dT_moist = _moist_adiabatic_lapse_rate(t_parcel_k[k], p_k) * dp
+            t_moist_k1 = t_parcel_k[k] + dT_moist
+
+            # At transition level (first level above LCL): blend from dry→moist
+            # by starting the moist integration from the LCL temperature
+            # interpolated along the dry parcel to the LCL pressure.
+            # For simplicity and numerical stability we switch at the first
+            # level where the mid-point is above the LCL.
+            p_mid = 0.5 * (p_k + p_k1)
+            crossing_lcl = (p_mid <= p_lcl_pa) & (p_k > p_lcl_pa)
+            # At the crossing level, restart from the LCL temperature on a
+            # moist adiabat: T_lcl then integrate to p_k1
+            dT_from_lcl = _moist_adiabatic_lapse_rate(t_lcl_k, p_lcl_pa) * (p_k1 - p_lcl_pa)
+            t_moist_from_lcl = t_lcl_k + dT_from_lcl
+
+            t_parcel_k[k + 1] = np.where(
+                above_lcl, t_moist_k1,
+                np.where(crossing_lcl, t_moist_from_lcl, t_dry_k[k + 1])
+            )
+
+        # --- Interpolate parcel temperature to -20°C isotherm pressure ---
+        t_parcel_c = t_parcel_k - 273.15
+        t_parcel_at_isotherm = _interp_level_to_pressure(t_parcel_c, levels_above, isotherm_p_pa)
+
+        # --- Compute LI-20 and update running minimum ---
+        li20 = t_env_at_isotherm - t_parcel_at_isotherm
+        li20 = np.where(valid, li20, np.nan)
+
+        min_li20 = np.where(
+            np.isfinite(li20) & (np.isnan(min_li20) | (li20 < min_li20)),
+            li20,
+            min_li20,
+        )
+
+    print(f'Min LI-20 < 0 grid points: {np.sum(min_li20 < 0.0)}')
+    return min_li20
+
+
 def calculate_freezing_level_height_ft(data):
     """Return freezing level height (ft AMSL), interpolated from available levels."""
     temp_isobaric = get_time_index(data['Temperature_isobaric']) - 273.15
@@ -1062,6 +1311,11 @@ def get_gfs_data(forecast_hour=9, latest_dataset=None, init_time=None, include_t
         params.update({
             'var_ACPCP': 'on',
             'var_DZDT': 'on',
+            'lev_925_mb': 'on',
+            'lev_800_mb': 'on',
+            'lev_750_mb': 'on',
+            'lev_700_mb': 'on',
+            'lev_650_mb': 'on',
             'lev_600_mb': 'on',
             'lev_400_mb': 'on',
             'lev_300_mb': 'on',
@@ -2396,9 +2650,10 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         total_totals = calculate_total_totals(data)
         max_wz = get_max_geometric_vertical_velocity(data, [60000, 50000, 40000, 30000, 25000])
         convective_precip = data['Convective_precipitation_1h_surface']
-        ts_mask = (total_totals > 45.0) & (max_wz > 0.1)
+        min_li20 = calculate_min_lifted_index_minus20(data)
+        ts_mask = (min_li20 < 0.0) & (max_wz > 0.1)
 
-        print(f'Total Totals > 45 grid points: {np.sum(total_totals > 45.0)}')
+        print(f'Min LI-20 < 0 grid points: {np.sum(min_li20 < 0.0)}')
         print(f'Max geometric vertical velocity > 0.1 m/s grid points: {np.sum(max_wz > 0.1)}')
         print(f'Combined TS mask grid points: {np.sum(ts_mask)}')
 

@@ -52,6 +52,8 @@ let playBtn;
 let speedSlider;
 let speedDisplay;
 let categoryButtons;
+let mobileCategorySelect;
+let mobileDomainSelect;
 let loadingOverlay;
 let loadingBarFill;
 let loadingStatus;
@@ -138,6 +140,8 @@ function initializeElements() {
     speedSlider = document.getElementById('speed-slider');
     speedDisplay = document.getElementById('speed-display');
     categoryButtons = document.querySelectorAll('.category-btn');
+    mobileCategorySelect = document.getElementById('mobile-category-select');
+    mobileDomainSelect = document.getElementById('mobile-domain-select');
     loadingOverlay = document.getElementById('loading-overlay');
     loadingBarFill = document.getElementById('loading-bar-fill');
     loadingStatus = document.getElementById('loading-status');
@@ -390,6 +394,7 @@ async function switchCategory(category) {
     });
 
     currentCategory = category;
+    if (mobileCategorySelect) mobileCategorySelect.value = category;
     await loadSelection(true);
 
     if (wasPlaying) {
@@ -409,6 +414,7 @@ async function switchDomain(domainId) {
     }
 
     currentDomain = domainId;
+    if (mobileDomainSelect) mobileDomainSelect.value = domainId;
     await loadSelection(true);
 
     if (wasPlaying) {
@@ -456,6 +462,18 @@ function setupEventListeners() {
             switchCategory(this.getAttribute('data-category'));
         });
     });
+
+    if (mobileCategorySelect) {
+        mobileCategorySelect.addEventListener('change', function() {
+            switchCategory(this.value);
+        });
+    }
+
+    if (mobileDomainSelect) {
+        mobileDomainSelect.addEventListener('change', function() {
+            switchDomain(this.value);
+        });
+    }
 
     infoBtn.addEventListener('click', function() {
         openInfoModal();

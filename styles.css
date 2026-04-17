@@ -126,10 +126,6 @@ h1 {
     flex: 1;
 }
 
-body.loading .image-panel img {
-    filter: grayscale(1) brightness(0.78);
-}
-
 .loading-overlay {
     position: fixed;
     inset: 0;
@@ -500,47 +496,121 @@ body.loading .image-panel img {
     font-family: "BP Noname Pro", "Source Sans Pro", "Open Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
+/* Mobile selector dropdowns — hidden on desktop */
+.mobile-selectors {
+    display: none;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
+
+    /* --- Header --- */
     h1 {
-        font-size: 2em;
+        font-size: 1.05em;
+        padding: 4px 0;
     }
-    
+
+    .title-section {
+        padding: 6px 8px 4px;
+    }
+
+    .category-section {
+        padding: 6px 8px 8px;
+    }
+
+    /* Hide desktop category buttons, show mobile dropdowns */
+    .category-buttons {
+        display: none;
+    }
+
+    .mobile-selectors {
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+    }
+
+    .mobile-select {
+        flex: 0 1 auto;
+        width: 122px;
+        min-width: 110px;
+        padding: 4px 6px;
+        font-size: 12px;
+        font-weight: 600;
+        border-radius: 4px;
+        border: 1px solid #cccccc;
+        background: #ffffff;
+        color: #333333;
+        cursor: pointer;
+        appearance: none;
+        -webkit-appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23555'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 7px center;
+        padding-right: 22px;
+    }
+
+    /* --- Image panels: stack vertically --- */
     .image-pair {
         flex-direction: column;
-        gap: 15px;
+        gap: 4px;
     }
-    
-    .category-buttons {
-        flex-direction: column;
-        align-items: center;
+
+    /* Adjust main content area for smaller header + more compact controls */
+    .main-content {
+        top: 76px;
+        bottom: 70px;
     }
-    
-    .category-btn {
-        width: 200px;
+
+    /* --- Controls bar: more compact --- */
+    .controls {
+        padding: 6px 8px;
     }
-    
+
+    .slider-container {
+        margin-bottom: 2px;
+    }
+
+    .frame-slider {
+        width: 80%;
+        margin-bottom: 4px;
+    }
+
+    /* Larger thumb for touch */
+    .frame-slider::-webkit-slider-thumb {
+        width: 20px;
+        height: 20px;
+    }
+
+    .frame-slider::-moz-range-thumb {
+        width: 20px;
+        height: 20px;
+    }
+
     .playback-controls {
-        flex-direction: column;
-        gap: 15px;
+        gap: 6px;
     }
-    
-    .speed-control {
-        flex-direction: column;
-        text-align: center;
-        gap: 5px;
+
+    .control-btn {
+        padding: 5px 10px;
+        font-size: 11px;
+    }
+
+    #speed-slider {
+        width: 80px;
+    }
+
+    #speed-display {
+        font-size: 12px;
+        min-width: 38px;
     }
 
     .info-btn {
-        right: 8px;
-        bottom: 8px;
-        width: 28px;
-        height: 28px;
+        display: none;
     }
 
     .info-card {
         width: calc(100vw - 24px);
-        padding: 18px 16px;
+        padding: 16px 14px;
     }
 }
 
