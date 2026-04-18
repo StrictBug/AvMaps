@@ -25,10 +25,295 @@ const domainHotkeys = {
 };
 
 const categoryHotkeys = {
-    b: 'BG',
+    f: 'BG',
     s: 'TS',
     a: 'Airmass',
     t: 'Turb'
+};
+
+const LEGEND_PREFS_KEY = 'avmaps.legendPrefs.v1';
+const EXCLUDED_LEGEND_FIELD_IDS = new Set([
+    'airmass-fzl-fzl',
+    'airmass-snow-level',
+]);
+
+const FALLBACK_LEGENDS = {
+    BG: {
+        left: {
+            title: 'US',
+            fields: [
+                {
+                    id: 'bg-precip',
+                    label: '1 hr precipitation',
+                    units: 'mm/h',
+                    items: [
+                        { color: '#f0ff96', label: '0.1-0.2' },
+                        { color: '#ffff00', label: '0.5-1' },
+                        { color: '#009600', label: '5-7.5' },
+                        { color: '#00c8ff', label: '10-15' },
+                        { color: '#0000ff', label: '20-30' },
+                        { color: '#ff6400', label: '30-40' },
+                        { color: '#ff0000', label: '40-50' },
+                        { color: '#320000', label: '50+' },
+                    ],
+                },
+                {
+                    id: 'bg-drizzle',
+                    label: 'Drizzle',
+                    units: 'avg RH %',
+                    items: [
+                        { color: '#00ff00', label: '95-100' },
+                    ],
+                    note: 'Shown where layer-average RH exceeds 95%.',
+                },
+                {
+                    id: 'bg-low-cloud',
+                    label: 'Low cloud',
+                    units: 'max RH %',
+                    items: [
+                        { color: '#c86400', label: '85-90' },
+                        { color: '#aa5500', label: '90-95' },
+                        { color: '#6d3600', label: '95-100' },
+                    ],
+                },
+                {
+                    id: 'bg-fog',
+                    label: 'Fog',
+                    units: 'category',
+                    items: [
+                        { color: '#ff0000', label: 'F1' },
+                        { color: '#ffaa7f', label: 'F2' },
+                        { color: '#ffff00', label: 'F3' },
+                    ],
+                },
+            ],
+        },
+        right: {
+            title: 'ICON',
+            fields: [
+                {
+                    id: 'icon-bg-precip',
+                    label: '1 hr precipitation',
+                    units: 'mm/h',
+                    items: [
+                        { color: '#f0ff96', label: '0.1-0.2' },
+                        { color: '#ffff00', label: '0.5-1' },
+                        { color: '#009600', label: '5-7.5' },
+                        { color: '#00c8ff', label: '10-15' },
+                        { color: '#0000ff', label: '20-30' },
+                        { color: '#ff6400', label: '30-40' },
+                        { color: '#ff0000', label: '40-50' },
+                        { color: '#320000', label: '50+' },
+                    ],
+                },
+                {
+                    id: 'icon-bg-drizzle',
+                    label: 'Drizzle',
+                    units: 'avg RH %',
+                    items: [
+                        { color: '#00ff00', label: '95-100' },
+                    ],
+                    note: 'Shown where layer-average RH exceeds 95%.',
+                },
+                {
+                    id: 'icon-bg-low-cloud',
+                    label: 'Low cloud',
+                    units: 'max RH %',
+                    items: [
+                        { color: '#c86400', label: '85-90' },
+                        { color: '#aa5500', label: '90-95' },
+                        { color: '#6d3600', label: '95-100' },
+                    ],
+                },
+                {
+                    id: 'icon-bg-fog',
+                    label: 'Fog',
+                    units: 'category',
+                    items: [
+                        { color: '#ff0000', label: 'F1' },
+                        { color: '#ffaa7f', label: 'F2' },
+                        { color: '#ffff00', label: 'F3' },
+                    ],
+                },
+            ],
+        },
+    },
+    TS: {
+        left: {
+            title: 'Flash density',
+            fields: [
+                {
+                    id: 'ts-flash-precip',
+                    label: '1 hr thunderstorm precipitation',
+                    units: 'mm/h',
+                    items: [
+                        { color: '#00ff00', label: '0.1-0.3' },
+                        { color: '#fffb00', label: '0.5-1' },
+                        { color: '#ff9900', label: '5-7.5' },
+                        { color: '#ff0000', label: '15-20' },
+                        { color: '#ff20d6', label: '40-50' },
+                        { color: '#651dff', label: '60-100' },
+                    ],
+                },
+            ],
+        },
+        right: {
+            title: 'Severe storm potential',
+            fields: [
+                {
+                    id: 'ts-severe-sighail',
+                    label: 'SigHail',
+                    units: 'index',
+                    items: [
+                        { color: 'rgba(97,0,97,0.47)', label: '0.1-0.4' },
+                        { color: 'rgba(0,127,254,0.47)', label: '0.4-0.7' },
+                        { color: 'rgba(0,254,70,0.47)', label: '0.9-1.2' },
+                        { color: 'rgba(254,202,0,0.47)', label: '1.6-1.9' },
+                        { color: 'rgba(254,70,0,0.47)', label: '2.0-2.2' },
+                        { color: 'rgba(254,0,0,0.47)', label: '2.2-3.0' },
+                        { color: 'rgba(254,210,210,0.47)', label: '3.5-5+' },
+                    ],
+                },
+                {
+                    id: 'ts-severe-isotachs',
+                    label: 'Upper isotachs',
+                    units: 'kt',
+                    items: [
+                        { color: '#000080', label: '80-100' },
+                        { color: '#ffff00', label: '100-120' },
+                        { color: '#ff6600', label: '120-140' },
+                        { color: '#ff0000', label: '140-160' },
+                        { color: '#800000', label: '160-180' },
+                        { color: '#ff00ff', label: '180+' },
+                    ],
+                },
+                {
+                    id: 'ts-severe-shear-barbs',
+                    label: '0-6km bulk shear',
+                    units: '',
+                    items: [
+                        { pattern: 'barb', color: '#2b0000', label: '0-6km bulk shear' },
+                    ],
+                },
+            ],
+        },
+    },
+    Airmass: {
+        left: {
+            title: 'FZL',
+            fields: [
+                {
+                    id: 'airmass-fzl-freezing-layer',
+                    label: 'Freezing layer',
+                    units: 'hatch',
+                    items: [
+                        { pattern: 'crosshatch', label: 'Multiple 0C crossings' },
+                    ],
+                },
+                {
+                    id: 'airmass-fzl-icing',
+                    label: 'Icing severity',
+                    units: '%',
+                    items: [
+                        { color: '#00ccff', label: '95-97.5' },
+                        { color: '#00ffff', label: '97.5-100' },
+                    ],
+                },
+                {
+                    id: 'airmass-fzl-thermals',
+                    label: 'Thermals',
+                    units: 'ft',
+                    items: [
+                        { color: '#ffcc00', label: '6000-10000' },
+                        { color: '#ff6600', label: '10000-20000+' },
+                    ],
+                },
+                {
+                    id: 'airmass-fzl-hail',
+                    label: '1 hr small hail',
+                    units: 'mm/h',
+                    items: [
+                        { color: '#b2ebf2', label: '0.1-0.5' },
+                        { color: '#00bcd4', label: '2.5-5' },
+                        { color: '#0097a7', label: '5-10' },
+                        { color: '#006064', label: '10-20' },
+                        { color: '#00363a', label: '20+' },
+                    ],
+                },
+                {
+                    id: 'airmass-fzl-freezing-fog',
+                    label: 'Freezing fog',
+                    units: 'category',
+                    items: [
+                        { color: '#ff0000', label: 'F1' },
+                        { color: '#ffaa7f', label: 'F2' },
+                        { color: '#ffff00', label: 'F3' },
+                    ],
+                },
+            ],
+        },
+        right: {
+            title: 'Snow level',
+            fields: [
+                {
+                    id: 'airmass-snow-precip',
+                    label: '1 hr snow',
+                    units: 'mm/h',
+                    items: [
+                        { color: '#00b7ff', label: '0.1-0.2' },
+                        { color: '#54d6ff', label: '0.5-1' },
+                        { color: '#a8eeff', label: '1-2' },
+                        { color: '#e9fcff', label: '4-8' },
+                        { color: '#ffffff', label: '8+' },
+                    ],
+                },
+            ],
+        },
+    },
+    Turb: {
+        left: {
+            title: 'MTW',
+            fields: [
+                {
+                    id: 'turb-mtw-intensity',
+                    label: 'Mountain wave intensity',
+                    units: 'm/s',
+                    items: [
+                        { color: '#ff9900', label: '0.2-0.4' },
+                        { color: '#ff0000', label: '0.4-0.6' },
+                        { color: '#ff00ff', label: '0.6+' },
+                    ],
+                },
+            ],
+        },
+        right: {
+            title: 'Wind',
+            fields: [
+                {
+                    id: 'turb-wind-max850',
+                    label: 'Max wind below 5000ft',
+                    units: 'kt',
+                    items: [
+                        { color: '#00ff00', label: '25-30' },
+                        { color: '#0064ff', label: '40-45' },
+                        { color: '#ff0000', label: '50-55' },
+                        { color: '#be0000', label: '70-80' },
+                        { color: '#960000', label: '80+' },
+                    ],
+                },
+                {
+                    id: 'turb-wind-turbulence',
+                    label: 'Shear and lee turbulence',
+                    units: 'category',
+                    items: [
+                        { color: '#ffcc00', label: 'MOD' },
+                        { color: '#ff6600', label: 'SEV' },
+                        { color: '#ff0000', label: 'EXT' },
+                    ],
+                },
+            ],
+        },
+    },
 };
 
 let currentCategory = 'BG';
@@ -60,6 +345,12 @@ let loadingStatus;
 let infoBtn;
 let infoOverlay;
 let infoCloseBtn;
+let legendStrip;
+let legendContent;
+let legendToggleBtn;
+
+let legendEnabled = false;
+let hiddenLegendFields = {};
 
 function ensureDomainCache(domainId) {
     if (!framePairsCache[domainId]) {
@@ -87,8 +378,314 @@ function normalizeFrameManifest(manifest) {
     return {
         ...normalized,
         domainOrder,
-        domains: normalizedDomains
+        domains: normalizedDomains,
+        legends: normalized.legends || {}
     };
+}
+
+function getLegendStoragePayload() {
+    return {
+        hiddenFields: hiddenLegendFields,
+    };
+}
+
+function loadLegendPreferences() {
+    try {
+        const raw = localStorage.getItem(LEGEND_PREFS_KEY);
+        if (!raw) {
+            return;
+        }
+
+        const parsed = JSON.parse(raw);
+        hiddenLegendFields = parsed?.hiddenFields && typeof parsed.hiddenFields === 'object'
+            ? parsed.hiddenFields
+            : {};
+    } catch (error) {
+        console.warn('Unable to restore legend preferences:', error);
+    }
+}
+
+function saveLegendPreferences() {
+    try {
+        localStorage.setItem(LEGEND_PREFS_KEY, JSON.stringify(getLegendStoragePayload()));
+    } catch (error) {
+        console.warn('Unable to save legend preferences:', error);
+    }
+}
+
+function getLegendConfigForCategory(category) {
+    const manifestLegend = frameManifest?.legends?.[category];
+    if (manifestLegend?.left || manifestLegend?.right) {
+        return manifestLegend;
+    }
+    return FALLBACK_LEGENDS[category] || null;
+}
+
+function getFieldHiddenState(category, panelKey, fieldId) {
+    return Boolean(hiddenLegendFields?.[category]?.[panelKey]?.includes(fieldId));
+}
+
+function setFieldHiddenState(category, panelKey, fieldId, isHidden) {
+    if (!hiddenLegendFields[category]) {
+        hiddenLegendFields[category] = {};
+    }
+    if (!hiddenLegendFields[category][panelKey]) {
+        hiddenLegendFields[category][panelKey] = [];
+    }
+
+    const bucket = hiddenLegendFields[category][panelKey];
+    const index = bucket.indexOf(fieldId);
+    if (isHidden && index === -1) {
+        bucket.push(fieldId);
+    }
+    if (!isHidden && index !== -1) {
+        bucket.splice(index, 1);
+    }
+}
+
+function getFieldAccentColor(field) {
+    const items = Array.isArray(field?.items) ? field.items : [];
+    const picked = items.find(item => item?.color && !String(item.color).includes('rgba(255,255,255,0)'));
+    if (picked) return picked?.color || '#7d9ecf';
+    const barbItem = items.find(item => item?.pattern === 'barb');
+    if (barbItem) return barbItem?.color || '#2b0000';
+    return '#7d9ecf';
+}
+
+function createBarbSwatch(color) {
+    const c = color || '#2b0000';
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', '20');
+    svg.setAttribute('height', '12');
+    svg.setAttribute('viewBox', '0 0 20 12');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.style.display = 'inline-block';
+    svg.style.verticalAlign = 'middle';
+    svg.style.flexShrink = '0';
+
+    const makeLine = (x1, y1, x2, y2) => {
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', x1); line.setAttribute('y1', y1);
+        line.setAttribute('x2', x2); line.setAttribute('y2', y2);
+        line.setAttribute('stroke', c);
+        line.setAttribute('stroke-width', '1.6');
+        line.setAttribute('stroke-linecap', 'round');
+        return line;
+    };
+
+    // Staff
+    svg.appendChild(makeLine(2, 6, 18, 6));
+    // Two barbs at the left end, slanted back (away from rightward motion)
+    svg.appendChild(makeLine(2, 6, 0.5, 10));
+    svg.appendChild(makeLine(5.5, 6, 4, 10));
+
+    return svg;
+}
+
+function createCrosshatchSwatch(color) {
+    const c = color || '#4a5a74';
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', '12');
+    svg.setAttribute('height', '12');
+    svg.setAttribute('viewBox', '0 0 12 12');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.style.display = 'inline-block';
+    svg.style.verticalAlign = 'middle';
+    svg.style.flexShrink = '0';
+
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', '0.5');
+    rect.setAttribute('y', '0.5');
+    rect.setAttribute('width', '11');
+    rect.setAttribute('height', '11');
+    rect.setAttribute('fill', '#ffffff');
+    rect.setAttribute('stroke', 'rgba(0, 0, 0, 0.24)');
+    rect.setAttribute('stroke-width', '1');
+    svg.appendChild(rect);
+
+    const makeLine = (x1, y1, x2, y2) => {
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', x1);
+        line.setAttribute('y1', y1);
+        line.setAttribute('x2', x2);
+        line.setAttribute('y2', y2);
+        line.setAttribute('stroke', c);
+        line.setAttribute('stroke-width', '1');
+        line.setAttribute('stroke-linecap', 'round');
+        return line;
+    };
+
+    // Two diagonal sets to represent crosshatching.
+    svg.appendChild(makeLine(0, 9, 3, 12));
+    svg.appendChild(makeLine(0, 5, 7, 12));
+    svg.appendChild(makeLine(0, 1, 11, 12));
+    svg.appendChild(makeLine(3, 0, 12, 9));
+    svg.appendChild(makeLine(7, 0, 12, 5));
+    svg.appendChild(makeLine(11, 0, 12, 1));
+
+    svg.appendChild(makeLine(0, 3, 3, 0));
+    svg.appendChild(makeLine(0, 7, 7, 0));
+    svg.appendChild(makeLine(0, 11, 11, 0));
+    svg.appendChild(makeLine(5, 12, 12, 5));
+    svg.appendChild(makeLine(9, 12, 12, 9));
+
+    return svg;
+}
+
+function formatLegendLabel(label) {
+    const raw = (label || '').toString().trim();
+    if (!raw) return raw;
+
+    const overrides = {
+        '1h precipitation': '1 hr precipitation',
+        'low cloud': 'Low cloud',
+        '1h thunderstorm precipitation': '1 hr thunderstorm precipitation',
+        'upper isotachs (250 hpa)': 'Upper isotachs',
+        '0-6km bulk shear': '0-6km bulk shear',
+        'icing rh': 'Icing severity',
+        'thermals (pblh)': 'Thermals',
+        'cold pool hail precip': '1 hr small hail',
+        'freezing fog': 'Freezing fog',
+        '1h snow precipitation': '1 hr snow',
+        'mountain wave intensity': 'Mountain wave intensity',
+        'max wind below 850 hpa': 'Max wind below 5000ft',
+        'shear and lee turbulence': 'Shear and lee turbulence',
+    };
+
+    return overrides[raw.toLowerCase()] || raw;
+}
+
+function normalizeLegendFieldForCompare(field) {
+    return {
+        label: field?.label || '',
+        units: field?.units || '',
+        note: field?.note || '',
+        items: (field?.items || []).map(item => ({
+            color: item?.color || '',
+            label: item?.label || '',
+            pattern: item?.pattern || '',
+        })),
+    };
+}
+
+function areLegendPanelsEquivalent(panelA, panelB) {
+    const fieldsA = (panelA?.fields || []).map(normalizeLegendFieldForCompare);
+    const fieldsB = (panelB?.fields || []).map(normalizeLegendFieldForCompare);
+    return JSON.stringify(fieldsA) === JSON.stringify(fieldsB);
+}
+
+function applyLegendLayoutState() {
+    document.body.classList.toggle('legend-enabled', legendEnabled);
+
+    if (legendStrip) {
+        legendStrip.classList.toggle('is-hidden', !legendEnabled);
+    }
+    if (legendToggleBtn) {
+        legendToggleBtn.textContent = legendEnabled ? 'Hide legend' : 'Show legend';
+        legendToggleBtn.setAttribute('aria-label', legendEnabled ? 'Hide legend' : 'Show legend');
+    }
+
+    if (legendStrip) {
+        legendStrip.setAttribute('aria-label', legendEnabled ? 'Legend panel' : 'Legend hidden. Use Show legend to restore.');
+    }
+}
+
+function renderLegend() {
+    if (!legendContent) {
+        return;
+    }
+
+    legendContent.innerHTML = '';
+    if (!legendEnabled) {
+        applyLegendLayoutState();
+        return;
+    }
+
+    const legendConfig = getLegendConfigForCategory(currentCategory);
+    if (!legendConfig) {
+        applyLegendLayoutState();
+        return;
+    }
+
+    const panelKeys = ['left', 'right'];
+    const panelKeysToRender = [];
+
+    panelKeys.forEach(panelKey => {
+        const panelConfig = legendConfig[panelKey];
+        if (!panelConfig) {
+            return;
+        }
+
+        const existingKey = panelKeysToRender.find(key => {
+            const existingPanel = legendConfig[key];
+            return areLegendPanelsEquivalent(existingPanel, panelConfig);
+        });
+
+        if (!existingKey) {
+            panelKeysToRender.push(panelKey);
+        }
+    });
+
+    panelKeysToRender.forEach(panelKey => {
+        const panelConfig = legendConfig[panelKey];
+        if (!panelConfig) {
+            return;
+        }
+
+        const panelNode = document.createElement('section');
+        panelNode.className = 'legend-panel';
+        panelNode.setAttribute('aria-label', panelConfig.title || panelKey.toUpperCase());
+
+        const togglesNode = document.createElement('div');
+        togglesNode.className = 'legend-field-toggles';
+
+        const fieldsToRender = (panelConfig.fields || []).filter(field => !EXCLUDED_LEGEND_FIELD_IDS.has(field?.id));
+
+        fieldsToRender.forEach((field, index) => {
+            const fieldId = field.id || `${panelKey}-${index}`;
+            const hidden = getFieldHiddenState(currentCategory, panelKey, fieldId);
+
+            const toggleBtn = document.createElement('button');
+            toggleBtn.type = 'button';
+            toggleBtn.className = `legend-field-toggle${hidden ? ' is-disabled' : ''}`;
+            toggleBtn.setAttribute('aria-pressed', hidden ? 'false' : 'true');
+
+            const barbItem = (field.items || []).find(item => item?.pattern === 'barb');
+            const crosshatchItem = (field.items || []).find(item => item?.pattern === 'crosshatch');
+            if (barbItem) {
+                const barbSvg = createBarbSwatch(barbItem.color);
+                toggleBtn.appendChild(barbSvg);
+            } else if (crosshatchItem) {
+                const hatchSwatch = createCrosshatchSwatch(crosshatchItem.color);
+                toggleBtn.appendChild(hatchSwatch);
+            } else {
+                const dot = document.createElement('span');
+                dot.className = 'legend-field-toggle-dot';
+                dot.style.setProperty('--legend-dot-color', getFieldAccentColor(field));
+                toggleBtn.appendChild(dot);
+            }
+
+            const toggleLabel = document.createElement('span');
+            toggleLabel.className = 'legend-field-toggle-label';
+            toggleLabel.textContent = formatLegendLabel(field.label || fieldId);
+            toggleBtn.appendChild(toggleLabel);
+
+            toggleBtn.addEventListener('click', () => {
+                setFieldHiddenState(currentCategory, panelKey, fieldId, !hidden);
+                saveLegendPreferences();
+                renderLegend();
+            });
+
+            togglesNode.appendChild(toggleBtn);
+        });
+
+        panelNode.appendChild(togglesNode);
+        legendContent.appendChild(panelNode);
+    });
+
+    legendContent.classList.toggle('single-panel', panelKeysToRender.length === 1);
+
+    applyLegendLayoutState();
 }
 
 async function loadFrameManifest(forceRefresh = false) {
@@ -148,6 +745,9 @@ function initializeElements() {
     infoBtn = document.getElementById('info-btn');
     infoOverlay = document.getElementById('info-overlay');
     infoCloseBtn = document.getElementById('info-close-btn');
+    legendStrip = document.getElementById('legend-strip');
+    legendContent = document.getElementById('legend-content');
+    legendToggleBtn = document.getElementById('legend-toggle-btn');
 }
 
 function isInfoModalOpen() {
@@ -376,6 +976,7 @@ async function loadSelection(forceRefresh = false) {
     await loadCategoryFrames(currentDomain, currentCategory, forceRefresh);
     setMaxFramesForCurrentSelection();
     updateImages();
+    renderLegend();
 }
 
 async function switchCategory(category) {
@@ -489,6 +1090,14 @@ function setupEventListeners() {
         }
     });
 
+    if (legendToggleBtn) {
+        legendToggleBtn.addEventListener('click', function() {
+            legendEnabled = !legendEnabled;
+            saveLegendPreferences();
+            renderLegend();
+        });
+    }
+
     leftImage.addEventListener('load', function() {
         this.classList.add('loaded');
     });
@@ -561,12 +1170,15 @@ function setupEventListeners() {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
+    loadLegendPreferences();
     initializeElements();
+    applyLegendLayoutState();
     setupEventListeners();
     setLoadingProgress(0, 0);
     loadSelection()
         .then(() => {
             updateImages();
+            renderLegend();
         })
         .catch(error => {
             console.warn('Failed to initialize category data:', error);

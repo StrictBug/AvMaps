@@ -71,6 +71,285 @@ CATEGORY_PANEL_DIRS = {
     'Turb': ('Turb/MTW', 'Turb/Wind'),
 }
 
+LEGEND_CONFIG = {
+    'BG': {
+        'left': {
+            'title': 'US',
+            'fields': [
+                {
+                    'id': 'bg-precip',
+                    'label': '1 hr precipitation',
+                    'units': 'mm/h',
+                    'items': [
+                        {'color': '#f0ff96', 'label': '0.1-0.2'},
+                        {'color': '#ffff00', 'label': '0.5-1'},
+                        {'color': '#009600', 'label': '5-7.5'},
+                        {'color': '#00c8ff', 'label': '10-15'},
+                        {'color': '#0000ff', 'label': '20-30'},
+                        {'color': '#ff6400', 'label': '30-40'},
+                        {'color': '#ff0000', 'label': '40-50'},
+                        {'color': '#320000', 'label': '50+'},
+                    ],
+                },
+                {
+                    'id': 'bg-drizzle',
+                    'label': 'Drizzle',
+                    'units': 'avg RH %',
+                    'items': [
+                        {'color': '#00ff00', 'label': '95-100'},
+                    ],
+                    'note': 'Shown where layer-average RH exceeds 95%.',
+                },
+                {
+                    'id': 'bg-low-cloud',
+                    'label': 'Low cloud',
+                    'units': 'max RH %',
+                    'items': [
+                        {'color': '#c86400', 'label': '85-90'},
+                        {'color': '#aa5500', 'label': '90-95'},
+                        {'color': '#6d3600', 'label': '95-100'},
+                    ],
+                },
+                {
+                    'id': 'bg-fog',
+                    'label': 'Fog',
+                    'units': 'category',
+                    'items': [
+                        {'color': '#ff0000', 'label': 'F1'},
+                        {'color': '#ffaa7f', 'label': 'F2'},
+                        {'color': '#ffff00', 'label': 'F3'},
+                    ],
+                },
+            ],
+        },
+        'right': {
+            'title': 'ICON',
+            'fields': [
+                {
+                    'id': 'icon-bg-precip',
+                    'label': '1 hr precipitation',
+                    'units': 'mm/h',
+                    'items': [
+                        {'color': '#f0ff96', 'label': '0.1-0.2'},
+                        {'color': '#ffff00', 'label': '0.5-1'},
+                        {'color': '#009600', 'label': '5-7.5'},
+                        {'color': '#00c8ff', 'label': '10-15'},
+                        {'color': '#0000ff', 'label': '20-30'},
+                        {'color': '#ff6400', 'label': '30-40'},
+                        {'color': '#ff0000', 'label': '40-50'},
+                        {'color': '#320000', 'label': '50+'},
+                    ],
+                },
+                {
+                    'id': 'icon-bg-drizzle',
+                    'label': 'Drizzle',
+                    'units': 'avg RH %',
+                    'items': [
+                        {'color': '#00ff00', 'label': '95-100'},
+                    ],
+                    'note': 'Shown where layer-average RH exceeds 95%.',
+                },
+                {
+                    'id': 'icon-bg-low-cloud',
+                    'label': 'Low cloud',
+                    'units': 'max RH %',
+                    'items': [
+                        {'color': '#c86400', 'label': '85-90'},
+                        {'color': '#aa5500', 'label': '90-95'},
+                        {'color': '#6d3600', 'label': '95-100'},
+                    ],
+                },
+                {
+                    'id': 'icon-bg-fog',
+                    'label': 'Fog',
+                    'units': 'category',
+                    'items': [
+                        {'color': '#ff0000', 'label': 'F1'},
+                        {'color': '#ffaa7f', 'label': 'F2'},
+                        {'color': '#ffff00', 'label': 'F3'},
+                    ],
+                },
+            ],
+        },
+    },
+    'TS': {
+        'left': {
+            'title': 'Flash density',
+            'fields': [
+                {
+                    'id': 'ts-flash-precip',
+                    'label': '1 hr thunderstorm precipitation',
+                    'units': 'mm/h',
+                    'items': [
+                        {'color': '#00ff00', 'label': '0.1-0.3'},
+                        {'color': '#fffb00', 'label': '0.5-1'},
+                        {'color': '#ff9900', 'label': '5-7.5'},
+                        {'color': '#ff0000', 'label': '15-20'},
+                        {'color': '#ff20d6', 'label': '40-50'},
+                        {'color': '#651dff', 'label': '60-100'},
+                    ],
+                },
+            ],
+        },
+        'right': {
+            'title': 'Severe storm potential',
+            'fields': [
+                {
+                    'id': 'ts-severe-sighail',
+                    'label': 'SigHail',
+                    'units': 'index',
+                    'items': [
+                        {'color': 'rgba(97,0,97,0.47)', 'label': '0.1-0.4'},
+                        {'color': 'rgba(0,127,254,0.47)', 'label': '0.4-0.7'},
+                        {'color': 'rgba(0,254,70,0.47)', 'label': '0.9-1.2'},
+                        {'color': 'rgba(254,202,0,0.47)', 'label': '1.6-1.9'},
+                        {'color': 'rgba(254,70,0,0.47)', 'label': '2.0-2.2'},
+                        {'color': 'rgba(254,0,0,0.47)', 'label': '2.2-3.0'},
+                        {'color': 'rgba(254,210,210,0.47)', 'label': '3.5-5+'},
+                    ],
+                },
+                {
+                    'id': 'ts-severe-isotachs',
+                    'label': 'Upper isotachs',
+                    'units': 'kt',
+                    'items': [
+                        {'color': '#000080', 'label': '80-100'},
+                        {'color': '#ffff00', 'label': '100-120'},
+                        {'color': '#ff6600', 'label': '120-140'},
+                        {'color': '#ff0000', 'label': '140-160'},
+                        {'color': '#800000', 'label': '160-180'},
+                        {'color': '#ff00ff', 'label': '180+'},
+                    ],
+                },
+                {
+                    'id': 'ts-severe-shear-barbs',
+                    'label': '0-6km bulk shear',
+                    'units': '',
+                    'items': [
+                        {'pattern': 'barb', 'color': '#2b0000', 'label': '0-6km bulk shear'},
+                    ],
+                },
+            ],
+        },
+    },
+    'Airmass': {
+        'left': {
+            'title': 'FZL',
+            'fields': [
+                {
+                    'id': 'airmass-fzl-freezing-layer',
+                    'label': 'Freezing layer',
+                    'units': 'hatch',
+                    'items': [
+                        {'pattern': 'crosshatch', 'label': 'Multiple 0C crossings'},
+                    ],
+                },
+                {
+                    'id': 'airmass-fzl-icing',
+                    'label': 'Icing severity',
+                    'units': '%',
+                    'items': [
+                        {'color': '#00ccff', 'label': '95-97.5'},
+                        {'color': '#00ffff', 'label': '97.5-100'},
+                    ],
+                },
+                {
+                    'id': 'airmass-fzl-thermals',
+                    'label': 'Thermals',
+                    'units': 'ft',
+                    'items': [
+                        {'color': '#ffcc00', 'label': '6000-10000'},
+                        {'color': '#ff6600', 'label': '10000-20000+'},
+                    ],
+                },
+                {
+                    'id': 'airmass-fzl-hail',
+                    'label': '1 hr small hail',
+                    'units': 'mm/h',
+                    'items': [
+                        {'color': '#b2ebf2', 'label': '0.1-0.5'},
+                        {'color': '#00bcd4', 'label': '2.5-5'},
+                        {'color': '#0097a7', 'label': '5-10'},
+                        {'color': '#006064', 'label': '10-20'},
+                        {'color': '#00363a', 'label': '20+'},
+                    ],
+                },
+                {
+                    'id': 'airmass-fzl-freezing-fog',
+                    'label': 'Freezing fog',
+                    'units': 'category',
+                    'items': [
+                        {'color': '#ff0000', 'label': 'F1'},
+                        {'color': '#ffaa7f', 'label': 'F2'},
+                        {'color': '#ffff00', 'label': 'F3'},
+                    ],
+                },
+            ],
+        },
+        'right': {
+            'title': 'Snow level',
+            'fields': [
+                {
+                    'id': 'airmass-snow-precip',
+                    'label': '1 hr snow',
+                    'units': 'mm/h',
+                    'items': [
+                        {'color': '#00b7ff', 'label': '0.1-0.2'},
+                        {'color': '#54d6ff', 'label': '0.5-1'},
+                        {'color': '#a8eeff', 'label': '1-2'},
+                        {'color': '#e9fcff', 'label': '4-8'},
+                        {'color': '#ffffff', 'label': '8+'},
+                    ],
+                },
+            ],
+        },
+    },
+    'Turb': {
+        'left': {
+            'title': 'MTW',
+            'fields': [
+                {
+                    'id': 'turb-mtw-intensity',
+                    'label': 'Mountain wave intensity',
+                    'units': 'm/s',
+                    'items': [
+                        {'color': '#ff9900', 'label': '0.2-0.4'},
+                        {'color': '#ff0000', 'label': '0.4-0.6'},
+                        {'color': '#ff00ff', 'label': '0.6+'},
+                    ],
+                },
+            ],
+        },
+        'right': {
+            'title': 'Wind',
+            'fields': [
+                {
+                    'id': 'turb-wind-max850',
+                    'label': 'Max wind below 5000ft',
+                    'units': 'kt',
+                    'items': [
+                        {'color': '#00ff00', 'label': '25-30'},
+                        {'color': '#0064ff', 'label': '40-45'},
+                        {'color': '#ff0000', 'label': '50-55'},
+                        {'color': '#be0000', 'label': '70-80'},
+                        {'color': '#960000', 'label': '80+'},
+                    ],
+                },
+                {
+                    'id': 'turb-wind-turbulence',
+                    'label': 'Shear and lee turbulence',
+                    'units': 'category',
+                    'items': [
+                        {'color': '#ffcc00', 'label': 'MOD'},
+                        {'color': '#ff6600', 'label': 'SEV'},
+                        {'color': '#ff0000', 'label': 'EXT'},
+                    ],
+                },
+            ],
+        },
+    },
+}
+
 REMOVABLE_IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
 TAF_LABEL_DX = -0.12
 TAF_LABEL_DY = 0.12
@@ -420,6 +699,7 @@ def write_frame_manifest(base_dir=None):
     manifest = {
         'generatedAt': datetime.now(timezone.utc).isoformat(),
         'domainOrder': normalize_domain_ids(),
+        'legends': LEGEND_CONFIG,
         'domains': domains,
     }
 
@@ -1770,7 +2050,7 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         layer_profile=layer_profile,
     )
 
-    # Keep TS profile layering unchanged while restoring the requested BG/Turb stack.
+    # Keep Thunderstorms profile layering unchanged while restoring the requested Fog & Low Cloud/Turbulence stack.
     if bg_or_turb_profile:
         z_coast = 9
         z_borders = 9
@@ -2573,7 +2853,7 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             zorder=z_fog)
 
     if airmass_fzl_profile:
-        # Plot freezing fog using BG fog thresholds but only where surface temp < 0C.
+        # Plot freezing fog using Fog & Low Cloud thresholds but only where surface temp < 0C.
         temp_2m = get_time_index(data['Temperature_height_above_ground'].sel(height_above_ground3=2)) - 273.15
         dewpoint_2m = get_time_index(data['Dewpoint_temperature_height_above_ground'].sel(height_above_ground4=2)) - 273.15
         wind_speed_kt = np.sqrt(u_wind.values**2 + v_wind.values**2) * 1.94384  # m/s to kt
@@ -2607,7 +2887,7 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             zorder=7.2,
         )
     
-    # Plot 1hr precipitation / TS flash density field
+    # Plot 1hr precipitation / Thunderstorms flash density field
     if ts_flash_profile:
         base_precip = get_time_index(data['Precipitation_rate_surface']) * 3600  # Convert to mm/hr
         base_precip_masked = base_precip.where(base_precip >= 0.1, np.nan)
@@ -2655,7 +2935,7 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
 
         print(f'Min LI-20 < 0 grid points: {np.sum(min_li20 < 0.0)}')
         print(f'Max geometric vertical velocity > 0.1 m/s grid points: {np.sum(max_wz > 0.1)}')
-        print(f'Combined TS mask grid points: {np.sum(ts_mask)}')
+        print(f'Combined Thunderstorms mask grid points: {np.sum(ts_mask)}')
 
         precip_masked = np.where(ts_mask & (convective_precip.values >= 0.1), convective_precip.values, np.nan)
         precip_levels = [0, 0.1, 0.3, 0.5, 1.0, 2.5, 5.0, 7.5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 100, 300]
@@ -2746,7 +3026,7 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             zorder=precip_zorder)
 
     if ts_flash_profile:
-        # Add subtle dotted bin outlines to separate TS increments from background layers.
+        # Add subtle dotted bin outlines to separate Thunderstorms increments from background layers.
         outline_levels = precip_levels[1:-1]
         ax.contour(
             data.longitude,
@@ -2760,7 +3040,7 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             zorder=precip_zorder + 0.1,
         )
 
-        # Draw the outer patch boundary so dashed lines appear on the edge of colored TS areas too.
+        # Draw the outer patch boundary so dashed lines appear on the edge of colored Thunderstorms areas too.
         patch_mask = np.isfinite(precip_masked).astype(float)
         ax.contour(
             data.longitude,
@@ -2855,9 +3135,22 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         zorder=300,
     )
     
+    title_prefix_map = {
+        ('GFS', 'bg'): 'GFS Fog & Low Cloud',
+        ('ICON', 'bg'): 'ICON Fog & Low Cloud',
+        ('GFS', 'ts_flash'): 'GFS Thunderstorms',
+        ('GFS', 'ts_severe'): 'GFS Storm Dynamics',
+        ('GFS', 'airmass_fzl'): 'GFS Freezing Level',
+        ('GFS', 'airmass_snow'): 'GFS Snow Level',
+        ('GFS', 'turb_mtw'): 'GFS Mountain Waves',
+        ('GFS', 'turb_wind'): 'GFS Low Level Turbulence',
+    }
+
+    title_prefix = title_prefix_map.get((model_name, layer_profile), f'{model_name} Forecast')
+
     # Add title
     title = (
-        f'{model_name} Forecast\n'
+        f'{title_prefix}\n'
         f'Run: {init_time.strftime("%Y-%m-%d %H%MZ")} | Valid: '
         f'{valid_time.strftime("%Y-%m-%d %H%MZ")}'
     )
@@ -2890,7 +3183,7 @@ def generate_gfs_bg_frames(
             os.makedirs(temp_dir, exist_ok=True)
             temp_dirs[domain_id] = temp_dir
 
-        print(f'Generating {len(forecast_hours)} BG forecast frames for domains {", ".join(domain_ids)} in temporary workspace: {staging_root}')
+        print(f'Generating {len(forecast_hours)} Fog & Low Cloud forecast frames for domains {", ".join(domain_ids)} in temporary workspace: {staging_root}')
 
         for forecast_hour in forecast_hours:
             print(f'\nGenerating frame +{forecast_hour}hrs...')
@@ -2907,10 +3200,10 @@ def generate_gfs_bg_frames(
                 save_output_figure(fig, temp_filepath)
                 plt.close(fig)
                 generated_files_by_domain[domain_id].append(filename)
-                print(f'BG map staged for {domain_id} at {temp_filepath}')
+                print(f'Fog & Low Cloud map staged for {domain_id} at {temp_filepath}')
 
         for domain_id in domain_ids:
-            print(f'\nFinished building {len(generated_files_by_domain[domain_id])} BG frames for {domain_id}. Publishing to {output_dirs[domain_id]}...')
+            print(f'\nFinished building {len(generated_files_by_domain[domain_id])} Fog & Low Cloud frames for {domain_id}. Publishing to {output_dirs[domain_id]}...')
             publish_generated_frames(output_dirs[domain_id], generated_files_by_domain[domain_id], temp_dirs[domain_id])
         if update_manifest:
             write_frame_manifest()
@@ -2933,7 +3226,7 @@ def generate_gfs_ts_flash_frames(
         latest_dataset, init_time = get_latest_gfs_dataset()
 
     with tempfile.TemporaryDirectory(prefix='avmaps_ts_flash_') as staging_root:
-        print(f'Generating {len(forecast_hours)} TS flash-density frames for domains {", ".join(domain_ids)} in temporary workspace: {staging_root}')
+        print(f'Generating {len(forecast_hours)} Thunderstorms flash-density frames for domains {", ".join(domain_ids)} in temporary workspace: {staging_root}')
         temp_dirs = {}
         generated_files_by_domain = {domain_id: [] for domain_id in domain_ids}
         for domain_id in domain_ids:
@@ -2944,7 +3237,7 @@ def generate_gfs_ts_flash_frames(
         last_generated_hour = None
 
         for forecast_hour in forecast_hours:
-            print(f'\nGenerating TS flash-density frame +{forecast_hour}hrs...')
+            print(f'\nGenerating Thunderstorms flash-density frame +{forecast_hour}hrs...')
 
             use_prev = prev_acpcp_values is not None and last_generated_hour == forecast_hour - 1
             data, init_time, prev_acpcp_values = get_gfs_data(
@@ -2964,10 +3257,10 @@ def generate_gfs_ts_flash_frames(
                 save_output_figure(fig, temp_filepath)
                 plt.close(fig)
                 generated_files_by_domain[domain_id].append(filename)
-                print(f'TS flash-density map staged for {domain_id} at {temp_filepath}')
+                print(f'Thunderstorms flash-density map staged for {domain_id} at {temp_filepath}')
 
         for domain_id in domain_ids:
-            print(f'\nFinished building {len(generated_files_by_domain[domain_id])} TS flash-density frames for {domain_id}. Publishing to {output_dirs[domain_id]}...')
+            print(f'\nFinished building {len(generated_files_by_domain[domain_id])} Thunderstorms flash-density frames for {domain_id}. Publishing to {output_dirs[domain_id]}...')
             publish_generated_frames(output_dirs[domain_id], generated_files_by_domain[domain_id], temp_dirs[domain_id])
         if update_manifest:
             write_frame_manifest()
@@ -2990,7 +3283,7 @@ def generate_gfs_ts_severe_frames(
         latest_dataset, init_time = get_latest_gfs_dataset()
 
     with tempfile.TemporaryDirectory(prefix='avmaps_ts_severe_') as staging_root:
-        print(f'Generating {len(forecast_hours)} TS severe-potential frames for domains {", ".join(domain_ids)} in temporary workspace: {staging_root}')
+        print(f'Generating {len(forecast_hours)} Thunderstorms severe-potential frames for domains {", ".join(domain_ids)} in temporary workspace: {staging_root}')
         temp_dirs = {}
         generated_files_by_domain = {domain_id: [] for domain_id in domain_ids}
         for domain_id in domain_ids:
@@ -3001,7 +3294,7 @@ def generate_gfs_ts_severe_frames(
         last_generated_hour = None
 
         for forecast_hour in forecast_hours:
-            print(f'\nGenerating TS severe-potential frame +{forecast_hour}hrs...')
+            print(f'\nGenerating Thunderstorms severe-potential frame +{forecast_hour}hrs...')
 
             use_prev = prev_acpcp_values is not None and last_generated_hour == forecast_hour - 1
             data, init_time, prev_acpcp_values = get_gfs_data(
@@ -3021,10 +3314,10 @@ def generate_gfs_ts_severe_frames(
                 save_output_figure(fig, temp_filepath)
                 plt.close(fig)
                 generated_files_by_domain[domain_id].append(filename)
-                print(f'TS severe-potential map staged for {domain_id} at {temp_filepath}')
+                print(f'Thunderstorms severe-potential map staged for {domain_id} at {temp_filepath}')
 
         for domain_id in domain_ids:
-            print(f'\nFinished building {len(generated_files_by_domain[domain_id])} TS severe-potential frames for {domain_id}. Publishing to {output_dirs[domain_id]}...')
+            print(f'\nFinished building {len(generated_files_by_domain[domain_id])} Thunderstorms severe-potential frames for {domain_id}. Publishing to {output_dirs[domain_id]}...')
             publish_generated_frames(output_dirs[domain_id], generated_files_by_domain[domain_id], temp_dirs[domain_id])
         if update_manifest:
             write_frame_manifest()
@@ -3181,7 +3474,7 @@ def _generate_gfs_turb_frames_internal(
             targets.append('Wind')
 
         print(
-            f"Generating {len(forecast_hours)} Turb {'/'.join(targets)} frames for domains {', '.join(domain_ids)} in temporary workspaces: "
+            f"Generating {len(forecast_hours)} Turbulence {'/'.join(targets)} frames for domains {', '.join(domain_ids)} in temporary workspaces: "
             f'{mtw_staging_root} and {wind_staging_root}'
         )
 
@@ -3202,7 +3495,7 @@ def _generate_gfs_turb_frames_internal(
                 wind_temp_dirs[domain_id] = temp_dir
 
         for forecast_hour in forecast_hours:
-            print(f'\nGenerating Turb frame +{forecast_hour}hrs...')
+            print(f'\nGenerating Turbulence frame +{forecast_hour}hrs...')
 
             data, init_time, _ = get_gfs_data(
                 forecast_hour,
@@ -3210,7 +3503,7 @@ def _generate_gfs_turb_frames_internal(
                 init_time,
                 include_ts_fields=include_mtw,
             )
-            print('Using raw hourly GFS 0.25 model fields for Turb maps')
+            print('Using raw hourly GFS 0.25 model fields for Turbulence maps')
 
             if include_mtw:
                 mtw_filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.{OUTPUT_IMAGE_EXT}'
@@ -3220,7 +3513,7 @@ def _generate_gfs_turb_frames_internal(
                     save_output_figure(mtw_fig, mtw_temp_filepath)
                     plt.close(mtw_fig)
                     mtw_generated_files[domain_id].append(mtw_filename)
-                    print(f'Turb/MTW map staged for {domain_id} at {mtw_temp_filepath}')
+                    print(f'Turbulence/MTW map staged for {domain_id} at {mtw_temp_filepath}')
 
             if include_wind:
                 wind_filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.{OUTPUT_IMAGE_EXT}'
@@ -3230,16 +3523,16 @@ def _generate_gfs_turb_frames_internal(
                     save_output_figure(wind_fig, wind_temp_filepath)
                     plt.close(wind_fig)
                     wind_generated_files[domain_id].append(wind_filename)
-                    print(f'Turb/Wind map staged for {domain_id} at {wind_temp_filepath}')
+                    print(f'Turbulence/Wind map staged for {domain_id} at {wind_temp_filepath}')
 
         if include_mtw:
             for domain_id in domain_ids:
-                print(f'\nFinished building {len(mtw_generated_files[domain_id])} Turb/MTW frames for {domain_id}. Publishing to {mtw_output_dirs[domain_id]}...')
+                print(f'\nFinished building {len(mtw_generated_files[domain_id])} Turbulence/MTW frames for {domain_id}. Publishing to {mtw_output_dirs[domain_id]}...')
                 publish_generated_frames(mtw_output_dirs[domain_id], mtw_generated_files[domain_id], mtw_temp_dirs[domain_id])
 
         if include_wind:
             for domain_id in domain_ids:
-                print(f'Finished building {len(wind_generated_files[domain_id])} Turb/Wind frames for {domain_id}. Publishing to {wind_output_dirs[domain_id]}...')
+                print(f'Finished building {len(wind_generated_files[domain_id])} Turbulence/Wind frames for {domain_id}. Publishing to {wind_output_dirs[domain_id]}...')
                 publish_generated_frames(wind_output_dirs[domain_id], wind_generated_files[domain_id], wind_temp_dirs[domain_id])
 
         if update_manifest:

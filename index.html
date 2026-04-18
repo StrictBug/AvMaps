@@ -10,14 +10,15 @@
 <body class="loading">
     <header>
         <div class="title-section">
+            <button id="info-btn" class="info-btn" type="button" aria-label="Show keyboard controls" title="Keyboard controls">i</button>
             <h1>Aviation map viewer</h1>
         </div>
         <div class="category-section">
             <div class="category-buttons">
-                <button class="category-btn active" data-category="BG">BG</button>
-                <button class="category-btn" data-category="TS">TS</button>
+                <button class="category-btn active" data-category="BG">Fog & Low Cloud</button>
+                <button class="category-btn" data-category="TS">Thunderstorms</button>
                 <button class="category-btn" data-category="Airmass">Airmass</button>
-                <button class="category-btn" data-category="Turb">Turb</button>
+                <button class="category-btn" data-category="Turb">Turbulence</button>
             </div>
             <div class="mobile-selectors">
                 <select id="mobile-domain-select" class="mobile-select" aria-label="Select domain">
@@ -27,10 +28,10 @@
                     <option value="NSW">NSW</option>
                 </select>
                 <select id="mobile-category-select" class="mobile-select" aria-label="Select category">
-                    <option value="BG">BG</option>
-                    <option value="TS">TS</option>
+                    <option value="BG">Fog & Low Cloud</option>
+                    <option value="TS">Thunderstorms</option>
                     <option value="Airmass">Airmass</option>
-                    <option value="Turb">Turb</option>
+                    <option value="Turb">Turbulence</option>
                 </select>
             </div>
         </div>
@@ -66,10 +67,10 @@
 
             <div class="info-section">
                 <h3>Switch Category</h3>
-                <p><span class="key-chip">B</span> BG</p>
-                <p><span class="key-chip">S</span> TS</p>
+                <p><span class="key-chip">F</span> Fog & Low Cloud</p>
+                <p><span class="key-chip">S</span> Thunderstorms</p>
                 <p><span class="key-chip">A</span> Airmass</p>
-                <p><span class="key-chip">T</span> Turb</p>
+                <p><span class="key-chip">T</span> Turbulence</p>
             </div>
 
             <div class="info-section">
@@ -90,6 +91,15 @@
     </div>
 
     <div class="controls">
+            <div class="legend-strip" id="legend-strip" aria-live="polite">
+                <div class="legend-header">
+                    <div class="legend-actions">
+                        <button id="legend-toggle-btn" class="legend-action-btn" type="button" aria-label="Toggle legend visibility">Hide legend</button>
+                    </div>
+                </div>
+                <div class="legend-content" id="legend-content"></div>
+            </div>
+
             <div class="slider-container">
                 <input type="range" id="frame-slider" class="frame-slider" min="1" max="40" value="1" step="1">
             </div>
@@ -102,7 +112,6 @@
                     <span id="speed-display">500ms</span>
                 </div>
             </div>
-            <button id="info-btn" class="info-btn" type="button" aria-label="Show keyboard controls" title="Keyboard controls">i</button>
         </div>
 
     <script src="script.js"></script>
