@@ -100,8 +100,33 @@
                 <div class="legend-content" id="legend-content"></div>
             </div>
 
-            <div class="slider-container">
-                <input type="range" id="frame-slider" class="frame-slider" min="1" max="40" value="1" step="1">
+            <div class="range-time-display" id="range-time-display" aria-live="polite">
+                <div class="current-time-row">
+                    <div class="current-time-item"><strong id="current-frame-time">--</strong></div>
+                    <div class="timezone-selector">
+                        <select id="timezone-select" aria-label="Select timezone">
+                            <option value="UTC" selected>UTC (UTC+0:00)</option>
+                            <option value="AWST">AWST (UTC+8:00)</option>
+                            <option value="ACST">ACST (UTC+9:30)</option>
+                            <option value="AEST">AEST (UTC+10:00)</option>
+                            <option value="ACDT">ACDT (UTC+10:30)</option>
+                            <option value="AEDT">AEDT (UTC+11:00)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="range-time-row">
+                    <span class="range-time-item range-time-item-start"><strong id="range-start-time">--</strong></span>
+                    <div class="slider-container">
+                        <div class="frame-slider-shell" id="frame-slider-shell">
+                            <div class="frame-slider-base" aria-hidden="true"></div>
+                            <div class="frame-selection-highlight" id="frame-selection-highlight" aria-hidden="true"></div>
+                            <input type="range" id="frame-range-start" class="frame-bound-slider" min="1" max="40" value="1" step="1" aria-label="Start frame">
+                            <input type="range" id="frame-range-end" class="frame-bound-slider" min="1" max="40" value="40" step="1" aria-label="End frame">
+                            <input type="range" id="frame-slider" class="frame-slider" min="1" max="40" value="1" step="1">
+                        </div>
+                    </div>
+                    <span class="range-time-item range-time-item-end"><strong id="range-end-time">--</strong></span>
+                </div>
             </div>
             
             <div class="playback-controls">

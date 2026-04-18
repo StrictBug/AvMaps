@@ -32,6 +32,16 @@ const categoryHotkeys = {
 };
 
 const LEGEND_PREFS_KEY = 'avmaps.legendPrefs.v1';
+const TIMEZONE_PREFS_KEY = 'avmaps.timezonePrefs.v2';
+const TIMEZONE_OPTIONS = {
+    UTC: { abbr: 'UTC', offsetMinutes: 0 },
+    AWST: { abbr: 'AWST', offsetMinutes: 8 * 60 },
+    ACST: { abbr: 'ACST', offsetMinutes: (9 * 60) + 30 },
+    AEST: { abbr: 'AEST', offsetMinutes: 10 * 60 },
+    ACDT: { abbr: 'ACDT', offsetMinutes: (10 * 60) + 30 },
+    AEDT: { abbr: 'AEDT', offsetMinutes: 11 * 60 },
+};
+const DEFAULT_TIMEZONE_KEY = 'UTC';
 const EXCLUDED_LEGEND_FIELD_IDS = new Set([
     'airmass-fzl-fzl',
     'airmass-snow-level',
@@ -325,12 +335,22 @@ let maxFrames = DEFAULT_MAX_FRAMES;
 let isPlaying = false;
 let animationInterval = null;
 let animationSpeed = 500;
+let selectedRangeStart = 1;
+let selectedRangeEnd = DEFAULT_MAX_FRAMES;
+let selectedTimezoneKey = DEFAULT_TIMEZONE_KEY;
 let frameManifest = null;
 const framePairsCache = {};
 const decodedImageObjects = new Map();
 const pendingDecodePromises = new Map();
 
 let frameSlider;
+let frameRangeStartSlider;
+let frameRangeEndSlider;
+let frameSelectionHighlight;
+let rangeStartTimeLabel;
+let rangeEndTimeLabel;
+let currentFrameTimeLabel;
+let timezoneSelect;
 let leftImage;
 let rightImage;
 let playBtn;
@@ -348,6 +368,7 @@ let infoCloseBtn;
 let legendStrip;
 let legendContent;
 let legendToggleBtn;
+let controlsPanel;
 
 let legendEnabled = false;
 let hiddenLegendFields = {};
@@ -402,6 +423,30 @@ function loadLegendPreferences() {
             : {};
     } catch (error) {
         console.warn('Unable to restore legend preferences:', error);
+    }
+}
+
+function loadTimezonePreference() {
+    try {
+        const raw = localStorage.getItem(TIMEZONE_PREFS_KEY);
+        if (!raw) {
+            return;
+        }
+
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed.timezone === 'string' && TIMEZONE_OPTIONS[parsed.timezone]) {
+            selectedTimezoneKey = parsed.timezone;
+        }
+    } catch (error) {
+        console.warn('Unable to restore timezone preference:', error);
+    }
+}
+
+function saveTimezonePreference() {
+    try {
+        localStorage.setItem(TIMEZONE_PREFS_KEY, JSON.stringify({ timezone: selectedTimezoneKey }));
+    } catch (error) {
+        console.warn('Unable to save timezone preference:', error);
     }
 }
 
@@ -588,6 +633,20 @@ function applyLegendLayoutState() {
     if (legendStrip) {
         legendStrip.setAttribute('aria-label', legendEnabled ? 'Legend panel' : 'Legend hidden. Use Show legend to restore.');
     }
+
+    requestAnimationFrame(updateViewerBottomOffset);
+    setTimeout(updateViewerBottomOffset, 220);
+}
+
+function updateViewerBottomOffset() {
+    if (!controlsPanel) {
+        return;
+    }
+
+    const controlsHeight = Math.ceil(controlsPanel.getBoundingClientRect().height);
+    if (controlsHeight > 0) {
+        document.body.style.setProperty('--viewer-bottom-offset', `${controlsHeight}px`);
+    }
 }
 
 function renderLegend() {
@@ -725,12 +784,156 @@ function setMaxFramesForCurrentSelection() {
     const framePairs = getCurrentFramePairs();
     maxFrames = framePairs.length > 0 ? framePairs.length : DEFAULT_MAX_FRAMES;
     frameSlider.max = maxFrames;
-    currentFrame = Math.min(currentFrame, maxFrames);
+    selectedRangeStart = Math.max(1, Math.min(selectedRangeStart, maxFrames));
+    selectedRangeEnd = Math.max(selectedRangeStart, Math.min(selectedRangeEnd, maxFrames));
+    frameRangeStartSlider.min = 1;
+    frameRangeStartSlider.max = maxFrames;
+    frameRangeStartSlider.value = selectedRangeStart;
+    frameRangeEndSlider.min = 1;
+    frameRangeEndSlider.max = maxFrames;
+    frameRangeEndSlider.value = selectedRangeEnd;
+    currentFrame = clampFrameToSelectedRange(currentFrame);
     frameSlider.value = currentFrame;
+    updateSelectedRangeHighlight();
+    updateRangeTimeDisplay();
+}
+
+function clampFrameToSelectedRange(frame) {
+    return Math.max(selectedRangeStart, Math.min(frame, selectedRangeEnd));
+}
+
+function getSelectedRangeSize() {
+    return (selectedRangeEnd - selectedRangeStart) + 1;
+}
+
+function updateSelectedRangeHighlight() {
+    if (!frameSelectionHighlight || maxFrames <= 0) {
+        return;
+    }
+
+    const startPercent = ((selectedRangeStart - 1) / maxFrames) * 100;
+    const widthPercent = (getSelectedRangeSize() / maxFrames) * 100;
+    frameSelectionHighlight.style.left = `${startPercent}%`;
+    frameSelectionHighlight.style.width = `${widthPercent}%`;
+}
+
+function parseValidDateFromFramePath(path) {
+    if (typeof path !== 'string' || path.length === 0) {
+        return null;
+    }
+
+    const match = path.match(/_(\d{8})_(\d{2})_(\d{2})\.[^.]+$/);
+    if (!match) {
+        return null;
+    }
+
+    const [, ymd, initHourText] = match;
+    const year = Number(ymd.slice(0, 4));
+    const monthIndex = Number(ymd.slice(4, 6)) - 1;
+    const day = Number(ymd.slice(6, 8));
+    const initHour = Number(initHourText);
+
+    if (![year, monthIndex, day, initHour].every(Number.isFinite)) {
+        return null;
+    }
+
+    return new Date(Date.UTC(year, monthIndex, day, initHour, 0, 0));
+}
+
+function getValidDateForFramePair(framePair) {
+    if (!framePair) {
+        return null;
+    }
+
+    const baseDate = parseValidDateFromFramePath(framePair.leftPath) || parseValidDateFromFramePath(framePair.rightPath);
+    const leadHour = Number(framePair.hour);
+
+    if (!baseDate || !Number.isFinite(leadHour)) {
+        return null;
+    }
+
+    return new Date(baseDate.getTime() + (leadHour * 60 * 60 * 1000));
+}
+
+function formatDateForRangeDisplay(dateValue) {
+    if (!(dateValue instanceof Date) || Number.isNaN(dateValue.getTime())) {
+        return '--';
+    }
+
+    const timezone = TIMEZONE_OPTIONS[selectedTimezoneKey] || TIMEZONE_OPTIONS[DEFAULT_TIMEZONE_KEY];
+    const shiftedDate = new Date(dateValue.getTime() + (timezone.offsetMinutes * 60 * 1000));
+    const day = String(shiftedDate.getUTCDate()).padStart(2, '0');
+    const month = String(shiftedDate.getUTCMonth() + 1).padStart(2, '0');
+    const year = shiftedDate.getUTCFullYear();
+    const shortYear = String(year).slice(-2);
+    const hour = String(shiftedDate.getUTCHours()).padStart(2, '0');
+    const minute = String(shiftedDate.getUTCMinutes()).padStart(2, '0');
+
+    const isMobile = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+    if (isMobile) {
+        return `${day}/${month}/${shortYear} ${hour} ${timezone.abbr}`;
+    }
+
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dayName = dayNames[shiftedDate.getUTCDay()];
+    return `${dayName} ${day}/${month}/${year}, ${hour}:${minute} ${timezone.abbr}`;
+}
+
+function updateRangeTimeDisplay() {
+    if (!rangeStartTimeLabel || !rangeEndTimeLabel) {
+        return;
+    }
+
+    const framePairs = getCurrentFramePairs();
+    if (framePairs.length === 0) {
+        rangeStartTimeLabel.textContent = '--';
+        rangeEndTimeLabel.textContent = '--';
+        return;
+    }
+
+    const startFramePair = framePairs[selectedRangeStart - 1];
+    const endFramePair = framePairs[selectedRangeEnd - 1];
+    rangeStartTimeLabel.textContent = formatDateForRangeDisplay(getValidDateForFramePair(startFramePair));
+    rangeEndTimeLabel.textContent = formatDateForRangeDisplay(getValidDateForFramePair(endFramePair));
+}
+
+function updateCurrentTimestepDisplay(framePair = null) {
+    if (!currentFrameTimeLabel) {
+        return;
+    }
+
+    currentFrameTimeLabel.textContent = formatDateForRangeDisplay(getValidDateForFramePair(framePair));
+}
+
+function updateRangeStartValue(value) {
+    selectedRangeStart = Math.max(1, Math.min(value, selectedRangeEnd));
+    frameRangeStartSlider.value = selectedRangeStart;
+    currentFrame = clampFrameToSelectedRange(currentFrame);
+    frameSlider.value = currentFrame;
+    updateSelectedRangeHighlight();
+    updateRangeTimeDisplay();
+    updateImages();
+}
+
+function updateRangeEndValue(value) {
+    selectedRangeEnd = Math.min(maxFrames, Math.max(value, selectedRangeStart));
+    frameRangeEndSlider.value = selectedRangeEnd;
+    currentFrame = clampFrameToSelectedRange(currentFrame);
+    frameSlider.value = currentFrame;
+    updateSelectedRangeHighlight();
+    updateRangeTimeDisplay();
+    updateImages();
 }
 
 function initializeElements() {
     frameSlider = document.getElementById('frame-slider');
+    frameRangeStartSlider = document.getElementById('frame-range-start');
+    frameRangeEndSlider = document.getElementById('frame-range-end');
+    frameSelectionHighlight = document.getElementById('frame-selection-highlight');
+    rangeStartTimeLabel = document.getElementById('range-start-time');
+    rangeEndTimeLabel = document.getElementById('range-end-time');
+    currentFrameTimeLabel = document.getElementById('current-frame-time');
+    timezoneSelect = document.getElementById('timezone-select');
     leftImage = document.getElementById('left-image');
     rightImage = document.getElementById('right-image');
     playBtn = document.getElementById('play-btn');
@@ -748,6 +951,7 @@ function initializeElements() {
     legendStrip = document.getElementById('legend-strip');
     legendContent = document.getElementById('legend-content');
     legendToggleBtn = document.getElementById('legend-toggle-btn');
+    controlsPanel = document.querySelector('.controls');
 }
 
 function isInfoModalOpen() {
@@ -919,12 +1123,14 @@ function updateImages() {
     const framePairs = getCurrentFramePairs();
     if (framePairs.length === 0) {
         console.warn(`No ${currentCategory} frames available for domain ${currentDomain}.`);
+        updateCurrentTimestepDisplay();
         return;
     }
 
     const framePair = framePairs[currentFrame - 1];
     if (!framePair) {
         console.warn(`No ${currentCategory} frame available for domain ${currentDomain} at index ${currentFrame}.`);
+        updateCurrentTimestepDisplay();
         return;
     }
 
@@ -935,6 +1141,7 @@ function updateImages() {
     rightImage.src = framePair.rightPath;
     leftImage.alt = `${config.left.title} - Hour ${framePair.hour}`;
     rightImage.alt = `${config.right.title} - Hour ${framePair.hour}`;
+    updateCurrentTimestepDisplay(framePair);
 
     updateDecodeWindowsForAllStreams(currentFrame);
 }
@@ -944,13 +1151,16 @@ function startAnimation() {
         return;
     }
 
+    currentFrame = clampFrameToSelectedRange(currentFrame);
+    frameSlider.value = currentFrame;
+
     isPlaying = true;
     playBtn.textContent = '⏸ Pause';
 
     animationInterval = setInterval(() => {
         currentFrame += 1;
-        if (currentFrame > maxFrames) {
-            currentFrame = 1;
+        if (currentFrame > selectedRangeEnd) {
+            currentFrame = selectedRangeStart;
         }
 
         frameSlider.value = currentFrame;
@@ -1036,9 +1246,29 @@ async function preloadImages(domainId, category) {
 
 function setupEventListeners() {
     frameSlider.addEventListener('input', function() {
-        currentFrame = parseInt(this.value, 10);
+        currentFrame = clampFrameToSelectedRange(parseInt(this.value, 10));
+        this.value = currentFrame;
         updateImages();
     });
+
+    frameRangeStartSlider.addEventListener('input', function() {
+        updateRangeStartValue(parseInt(this.value, 10));
+    });
+
+    frameRangeEndSlider.addEventListener('input', function() {
+        updateRangeEndValue(parseInt(this.value, 10));
+    });
+
+    if (timezoneSelect) {
+        timezoneSelect.addEventListener('change', function() {
+            if (TIMEZONE_OPTIONS[this.value]) {
+                selectedTimezoneKey = this.value;
+                saveTimezonePreference();
+                updateRangeTimeDisplay();
+                updateCurrentTimestepDisplay(getCurrentFramePairs()[currentFrame - 1]);
+            }
+        });
+    }
 
     playBtn.addEventListener('click', function() {
         if (isPlaying) {
@@ -1142,7 +1372,7 @@ function setupEventListeners() {
 
         switch (event.key) {
             case 'ArrowLeft':
-                if (currentFrame > 1) {
+                if (currentFrame > selectedRangeStart) {
                     currentFrame -= 1;
                     frameSlider.value = currentFrame;
                     updateImages();
@@ -1150,7 +1380,7 @@ function setupEventListeners() {
                 event.preventDefault();
                 break;
             case 'ArrowRight':
-                if (currentFrame < maxFrames) {
+                if (currentFrame < selectedRangeEnd) {
                     currentFrame += 1;
                     frameSlider.value = currentFrame;
                     updateImages();
@@ -1171,8 +1401,14 @@ function setupEventListeners() {
 
 document.addEventListener('DOMContentLoaded', function() {
     loadLegendPreferences();
+    loadTimezonePreference();
     initializeElements();
+    updateViewerBottomOffset();
+    if (timezoneSelect) {
+        timezoneSelect.value = selectedTimezoneKey;
+    }
     applyLegendLayoutState();
+    updateSelectedRangeHighlight();
     setupEventListeners();
     setLoadingProgress(0, 0);
     loadSelection()
@@ -1192,11 +1428,14 @@ window.addEventListener('load', function() {
         })
         .finally(() => {
             hideLoadingOverlay();
+            updateViewerBottomOffset();
         });
 });
 
 window.addEventListener('resize', function() {
     updateImages();
+    updateRangeTimeDisplay();
+    updateViewerBottomOffset();
 });
 
 window.AnimationController = {
@@ -1205,7 +1444,7 @@ window.AnimationController = {
     stopAnimation,
     setFrame(frame) {
         if (frame >= 1 && frame <= maxFrames) {
-            currentFrame = frame;
+            currentFrame = clampFrameToSelectedRange(frame);
             frameSlider.value = currentFrame;
             updateImages();
         }
