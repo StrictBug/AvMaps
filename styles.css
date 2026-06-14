@@ -663,7 +663,7 @@ h1 {
 
 .info-btn {
     position: absolute;
-    left: 10px;
+    right: 10px;
     top: 50%;
     transform: translateY(-50%);
     width: 24px;
