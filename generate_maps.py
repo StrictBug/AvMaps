@@ -1316,13 +1316,13 @@ def calculate_shear_turbulence_category(data):
     strong_upper = upper_speed_kt > 45.0
     very_strong_upper = upper_speed_kt > 65.0
 
-    category = np.where(strong_upper & (shear_mag_kt >= 15.0) & (shear_mag_kt < 30.0), 1, category)
-    category = np.where(strong_upper & (shear_mag_kt >= 30.0) & (shear_mag_kt < 40.0), 2, category)
-    category = np.where(strong_upper & (shear_mag_kt >= 40.0), 3, category)
+    category = np.where(strong_upper & (shear_mag_kt >= 27.5) & (shear_mag_kt < 50.0), 1, category)
+    category = np.where(strong_upper & (shear_mag_kt >= 50.0) & (shear_mag_kt < 60.0), 2, category)
+    category = np.where(strong_upper & (shear_mag_kt >= 60.0), 3, category)
 
-    category = np.where(very_strong_upper & (shear_mag_kt >= 9.0) & (shear_mag_kt < 20.0), 1, category)
-    category = np.where(very_strong_upper & (shear_mag_kt >= 20.0) & (shear_mag_kt < 25.0), 2, category)
-    category = np.where(very_strong_upper & (shear_mag_kt >= 25.0), 3, category)
+    category = np.where(very_strong_upper & (shear_mag_kt >= 25.0) & (shear_mag_kt < 40.0), 1, category)
+    category = np.where(very_strong_upper & (shear_mag_kt >= 40.0) & (shear_mag_kt < 45.0), 2, category)
+    category = np.where(very_strong_upper & (shear_mag_kt >= 45.0), 3, category)
 
     max_category = np.max(category, axis=0)
     print(
@@ -1333,7 +1333,7 @@ def calculate_shear_turbulence_category(data):
 
 
 def calculate_lee_turbulence_category(data):
-    """Return categorical lee turbulence class for downhill flow within 3000 ft AGL up to 800 hPa.
+    """Return categorical lee turbulence class for downhill flow within 4000 ft AGL up to 800 hPa.
 
     Classes: 0 none, 1 moderate, 2 moderate/severe, 3 severe.
     """
@@ -1362,7 +1362,7 @@ def calculate_lee_turbulence_category(data):
 
     upper_heights_m = hgt_isobaric.values[up_to_800_mask, :, :]
     height_agl_m = upper_heights_m - terrain_m[np.newaxis, :, :]
-    within_3000ft_agl = np.isfinite(height_agl_m) & (height_agl_m >= 0.0) & (height_agl_m <= 914.4)
+    within_4000ft_agl = np.isfinite(height_agl_m) & (height_agl_m >= 0.0) & (height_agl_m <= 1219.2)
 
     u_upper = u_isobaric.values[up_to_800_mask, :, :]
     v_upper = v_isobaric.values[up_to_800_mask, :, :]
@@ -1376,9 +1376,9 @@ def calculate_lee_turbulence_category(data):
         terrain_grad_x[np.newaxis, :, :] * wind_unit_x
         + terrain_grad_y[np.newaxis, :, :] * wind_unit_y
     )
-    downhill_flow = directional_derivative < -1e-4
+    downhill_flow = directional_derivative < -0.0025
 
-    lee_mask = within_3000ft_agl & downhill_flow
+    lee_mask = within_4000ft_agl & downhill_flow
     category = np.zeros_like(upper_speed_kt, dtype=np.int8)
     category = np.where(lee_mask & (upper_speed_kt >= 30.0) & (upper_speed_kt < 40.0), 1, category)
     category = np.where(lee_mask & (upper_speed_kt >= 40.0) & (upper_speed_kt < 45.0), 2, category)
