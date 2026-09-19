@@ -59,7 +59,9 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libeccodes-dev libproj-dev proj-data proj-bin libgeos-dev
+          # Keep system PROJ/GEOS for Cartopy. Prefer pip eccodes wheels only so
+          # cfgrib does not mix apt libeccodes with eccodeslib (recent wheels segfault on exit).
+          sudo apt-get install -y libproj-dev proj-data proj-bin libgeos-dev
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 

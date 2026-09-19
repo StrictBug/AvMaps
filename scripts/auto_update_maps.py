@@ -258,4 +258,6 @@ def main() -> int:
 
 
 if __name__ == '__main__':
-    raise SystemExit(main())
+    # Use os._exit so CI is not marked failed by native eccodes/eckit teardown
+    # crashes after the site has already been published successfully.
+    os._exit(main())
