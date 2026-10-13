@@ -1142,9 +1142,230 @@ function updateImages() {
     leftImage.alt = `${config.left.title} - Hour ${framePair.hour}`;
     rightImage.alt = `${config.right.title} - Hour ${framePair.hour}`;
     updateCurrentTimestepDisplay(framePair);
+    syncMapExpandButtons();
 
     updateDecodeWindowsForAllStreams(currentFrame);
 }
+
+function getDisplayedImageContentBox(img) {
+    const rect = img.getBoundingClientRect();
+    const naturalWidth = img.naturalWidth || 1;
+    const naturalHeight = img.naturalHeight || 1;
+    const containerAspect = rect.width / Math.max(rect.height, 1e-6);
+    const imageAspect = naturalWidth / naturalHeight;
+
+    let contentWidth = rect.width;
+    let contentHeight = rect.height;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    // object-fit: contain letterboxing
+    if (containerAspect > imageAspect) {
+        contentHeight = rect.height;
+        contentWidth = contentHeight * imageAspect;
+        offsetX = (rect.width - contentWidth) / 2;
+    } else {
+        contentWidth = rect.width;
+        contentHeight = contentWidth / imageAspect;
+        offsetY = (rect.height - contentHeight) / 2;
+    }
+
+    return {
+        left: rect.left + offsetX,
+        top: rect.top + offsetY,
+        width: contentWidth,
+        height: contentHeight,
+        offsetX,
+        offsetY,
+    };
+}
+
+function getDomainGeoref(domainId = currentDomain) {
+    const domainInfo = frameManifest?.domains?.[domainId];
+    const extent = domainInfo?.extent;
+    const axesFraction = domainInfo?.axesFraction;
+    if (!extent || !axesFraction) {
+        return null;
+    }
+    return { extent, axesFraction };
+}
+
+function mapClickToLonLat(img, clientX, clientY) {
+    const georef = getDomainGeoref();
+    if (!georef) {
+        return null;
+    }
+    if (!img?.complete || !img.naturalWidth || !img.naturalHeight) {
+        return null;
+    }
+
+    const { extent, axesFraction } = georef;
+    const box = getDisplayedImageContentBox(img);
+    const xInImage = clientX - box.left;
+    const yInImage = clientY - box.top;
+    if (xInImage < 0 || yInImage < 0 || xInImage > box.width || yInImage > box.height) {
+        return null;
+    }
+
+    const nx = xInImage / box.width;
+    const ny = yInImage / box.height;
+
+    const axesLeft = axesFraction.left;
+    const axesTop = axesFraction.top;
+    const axesRight = axesFraction.left + axesFraction.width;
+    const axesBottom = axesFraction.top + axesFraction.height;
+
+    if (nx < axesLeft || nx > axesRight || ny < axesTop || ny > axesBottom) {
+        return null;
+    }
+
+    const fx = (nx - axesLeft) / Math.max(axesFraction.width, 1e-6);
+    const fy = (ny - axesTop) / Math.max(axesFraction.height, 1e-6);
+
+    const lon = extent.lonMin + fx * (extent.lonMax - extent.lonMin);
+    const lat = extent.latMax - fy * (extent.latMax - extent.latMin);
+
+    return {
+        lon,
+        lat,
+        offsetX: xInImage + box.offsetX,
+        offsetY: yInImage + box.offsetY,
+    };
+}
+
+function getImagePairEl() {
+    return document.getElementById('image-pair') || document.querySelector('.image-pair');
+}
+
+function syncMapExpandButtons() {
+    const config = imageConfig[currentCategory];
+    document.querySelectorAll('.map-expand-btn').forEach((btn) => {
+        const panel = btn.closest('.image-panel');
+        const expanded = Boolean(panel?.classList.contains('expanded'));
+        const side = btn.getAttribute('data-expand-panel');
+        const panelTitle = side === 'right'
+            ? (config?.right?.title || 'right map')
+            : (config?.left?.title || 'left map');
+        const label = `${panelTitle} map`;
+        btn.setAttribute('aria-pressed', expanded ? 'true' : 'false');
+        btn.setAttribute('aria-label', expanded ? `Restore ${label}` : `Expand ${label}`);
+        btn.title = expanded ? 'Restore split view' : 'Expand map';
+    });
+}
+
+function notifyMapLayoutChanged() {
+    requestAnimationFrame(() => {
+        window.dispatchEvent(new Event('resize'));
+        window.SoundingViewer?.syncPin?.();
+    });
+}
+
+function collapseExpandedMapPanel() {
+    const pair = getImagePairEl();
+    if (!pair?.classList.contains('map-expanded')) {
+        return false;
+    }
+    pair.classList.remove('map-expanded');
+    pair.querySelectorAll('.image-panel.expanded').forEach((panel) => {
+        panel.classList.remove('expanded');
+    });
+    syncMapExpandButtons();
+    notifyMapLayoutChanged();
+    return true;
+}
+
+function toggleMapPanelExpand(side) {
+    const pair = getImagePairEl();
+    if (!pair) return;
+
+    const target = pair.querySelector(side === 'right' ? '.right-panel' : '.left-panel');
+    if (!target) return;
+
+    const alreadyExpanded = target.classList.contains('expanded') && pair.classList.contains('map-expanded');
+    if (alreadyExpanded) {
+        collapseExpandedMapPanel();
+        return;
+    }
+
+    pair.querySelectorAll('.image-panel').forEach((panel) => {
+        panel.classList.toggle('expanded', panel === target);
+    });
+    pair.classList.add('map-expanded');
+    syncMapExpandButtons();
+    notifyMapLayoutChanged();
+}
+
+function lonLatToImageOffsets(img, lon, lat, domainId = currentDomain) {
+    const georef = getDomainGeoref(domainId);
+    if (!georef || !img?.complete || !img.naturalWidth || !img.naturalHeight) {
+        return null;
+    }
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+        return null;
+    }
+
+    const { extent, axesFraction } = georef;
+    const lonSpan = extent.lonMax - extent.lonMin;
+    const latSpan = extent.latMax - extent.latMin;
+    if (Math.abs(lonSpan) < 1e-9 || Math.abs(latSpan) < 1e-9) {
+        return null;
+    }
+
+    const fx = (lon - extent.lonMin) / lonSpan;
+    const fy = (extent.latMax - lat) / latSpan;
+    if (fx < 0 || fx > 1 || fy < 0 || fy > 1) {
+        return null;
+    }
+
+    const box = getDisplayedImageContentBox(img);
+    const nx = axesFraction.left + fx * axesFraction.width;
+    const ny = axesFraction.top + fy * axesFraction.height;
+    const xInImage = nx * box.width;
+    const yInImage = ny * box.height;
+
+    return {
+        offsetX: xInImage + box.offsetX,
+        offsetY: yInImage + box.offsetY,
+    };
+}
+
+function handleMapClick(event) {
+    if (!window.SoundingViewer || typeof window.SoundingViewer.openAt !== 'function') {
+        return;
+    }
+    if (!window.SoundingViewer.isToolEnabled?.()) {
+        return;
+    }
+
+    const img = event.currentTarget;
+    const mapped = mapClickToLonLat(img, event.clientX, event.clientY);
+    if (!mapped) {
+        return;
+    }
+
+    const framePair = getCurrentFramePairs()[currentFrame - 1];
+    const validTime = getValidDateForFramePair(framePair);
+    if (!(validTime instanceof Date) || Number.isNaN(validTime.getTime())) {
+        console.warn('Unable to determine valid time for sounding request');
+        return;
+    }
+
+    window.SoundingViewer.openAt({
+        lat: mapped.lat,
+        lon: mapped.lon,
+        validTime,
+        mapImg: img,
+        offsetX: mapped.offsetX,
+        offsetY: mapped.offsetY,
+    });
+}
+
+window.MapGeoref = {
+    getDisplayedImageContentBox,
+    mapClickToLonLat,
+    lonLatToImageOffsets,
+    getDomainGeoref,
+};
 
 function startAnimation() {
     if (animationInterval) {
@@ -1207,6 +1428,7 @@ async function switchCategory(category) {
     currentCategory = category;
     if (mobileCategorySelect) mobileCategorySelect.value = category;
     await loadSelection(true);
+    syncMapExpandButtons();
 
     if (wasPlaying) {
         startAnimation();
@@ -1223,6 +1445,9 @@ async function switchDomain(domainId) {
         clearInterval(animationInterval);
         animationInterval = null;
     }
+
+    // Pin/georef are domain-specific; drop the sounding rather than leave a stale marker.
+    window.SoundingViewer?.close?.();
 
     currentDomain = domainId;
     if (mobileDomainSelect) mobileDomainSelect.value = domainId;
@@ -1346,7 +1571,25 @@ function setupEventListeners() {
         console.warn(`Failed to load right image: ${this.src}`);
     });
 
+    leftImage.addEventListener('click', handleMapClick);
+    rightImage.addEventListener('click', handleMapClick);
+
+    document.querySelectorAll('.map-expand-btn').forEach((btn) => {
+        btn.addEventListener('click', function(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            const side = this.getAttribute('data-expand-panel');
+            toggleMapPanelExpand(side);
+        });
+    });
+
     document.addEventListener('keydown', function(event) {
+        const target = event.target;
+        const tagName = target?.tagName?.toLowerCase();
+        if (tagName === 'input' || tagName === 'select' || tagName === 'textarea' || target?.isContentEditable) {
+            return;
+        }
+
         if (isInfoModalOpen()) {
             if (event.key === 'Escape') {
                 closeInfoModal();
@@ -1354,6 +1597,27 @@ function setupEventListeners() {
             if (event.key === 'Escape' || event.key === ' ' || event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key in domainHotkeys || event.key.toLowerCase() in categoryHotkeys) {
                 event.preventDefault();
             }
+            return;
+        }
+
+        if (event.key === 'b' || event.key === 'B') {
+            if (window.SoundingViewer?.setToolEnabled && window.SoundingViewer?.isToolEnabled) {
+                window.SoundingViewer.setToolEnabled(!window.SoundingViewer.isToolEnabled());
+                event.preventDefault();
+            }
+            return;
+        }
+
+        if (window.SoundingViewer?.isOpen?.()) {
+            if (event.key === 'Escape') {
+                window.SoundingViewer.close();
+                event.preventDefault();
+            }
+            return;
+        }
+
+        if (event.key === 'Escape' && collapseExpandedMapPanel()) {
+            event.preventDefault();
             return;
         }
 
@@ -1436,6 +1700,7 @@ window.addEventListener('resize', function() {
     updateImages();
     updateRangeTimeDisplay();
     updateViewerBottomOffset();
+    window.SoundingViewer?.syncPin?.();
 });
 
 window.AnimationController = {
