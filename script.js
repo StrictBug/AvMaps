@@ -1145,6 +1145,15 @@ function updateImages() {
     syncMapExpandButtons();
 
     updateDecodeWindowsForAllStreams(currentFrame);
+
+    // Keep an open sounding locked to the displayed forecast valid time.
+    if (window.SoundingViewer?.isOpen?.()) {
+        const validTime = getValidDateForFramePair(framePair);
+        if (validTime instanceof Date && !Number.isNaN(validTime.getTime())) {
+            window.SoundingViewer.syncToValidTime?.(validTime);
+        }
+        window.SoundingViewer.syncPin?.();
+    }
 }
 
 function getDisplayedImageContentBox(img) {
