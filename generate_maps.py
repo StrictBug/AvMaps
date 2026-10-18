@@ -11,7 +11,6 @@ from cartopy.feature import ShapelyFeature
 from shapely.geometry import Point
 from shapely.prepared import prep
 from shapely.ops import unary_union
-from siphon.catalog import TDSCatalog
 import xarray as xr
 import numpy as np
 from datetime import datetime, timedelta, timezone
@@ -1645,21 +1644,39 @@ def get_elevation_data(data=None):
     
     return elevation, lons, lats
 
-# Function to get latest GFS data
+def _discover_latest_gfs_init_time_from_nomads():
+    """Find the newest GFS 0.25° cycle that has published f000 on NOMADS."""
+    filter_url = 'https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl'
+    listing = requests.get(filter_url, timeout=60)
+    listing.raise_for_status()
+    run_dates = sorted(set(re.findall(r'gfs\.(\d{8})', listing.text)), reverse=True)
+    if not run_dates:
+        raise RuntimeError('No GFS run dates found on NOMADS filter index')
+
+    # Walk newest dates/cycles first; require f000 so the cycle is actually open.
+    for run_date in run_dates[:4]:
+        for cycle in ('18', '12', '06', '00'):
+            cycle_listing = requests.get(
+                filter_url,
+                params={'dir': f'/gfs.{run_date}/{cycle}/atmos'},
+                timeout=60,
+            )
+            if cycle_listing.status_code != 200:
+                continue
+            if f'gfs.t{cycle}z.pgrb2.0p25.f000' not in cycle_listing.text:
+                continue
+            return datetime.strptime(run_date + cycle, '%Y%m%d%H').replace(tzinfo=timezone.utc)
+
+    raise RuntimeError('No complete GFS 0.25° cycles found on NOMADS')
+
+
 def get_latest_gfs_dataset():
-    # Access GFS 0.25 degree catalog
-    catalog_url = 'https://thredds.ucar.edu/thredds/catalog/grib/NCEP/GFS/Global_0p25deg/catalog.xml'
-    catalog = TDSCatalog(catalog_url)
-
-    # Get latest dataset
-    latest_dataset = catalog.datasets[2]  # Latest Collection
-    opendap_url = latest_dataset.access_urls['OPENDAP']
-    file_part = opendap_url.split('/')[-1]  # e.g., GFS_Global_0p25deg_20260407_1800.grib2
-    date_str = file_part.split('_')[3]
-    hour_str = file_part.split('_')[4][:2]
-    init_time = datetime.strptime(date_str + hour_str, '%Y%m%d%H').replace(tzinfo=timezone.utc)
-
-    return latest_dataset, init_time
+    # Discover the latest cycle from NOMADS (where gribs are downloaded).
+    # Avoid thredds.ucar.edu here — CI runners have hit intermittent TLS
+    # verification failures against that host. Callers only need a non-None
+    # dataset token plus init_time; actual fields come from NOMADS filter.
+    init_time = _discover_latest_gfs_init_time_from_nomads()
+    return True, init_time
 
 
 def get_gfs_data(forecast_hour=9, latest_dataset=None, init_time=None, include_ts_fields=False, prev_acpcp_values=None, include_airmass_fields=False):

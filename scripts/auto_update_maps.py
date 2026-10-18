@@ -88,18 +88,26 @@ def gfs_hour_is_ready(init_time, forecast_hour: int) -> bool:
         'lev_mean_sea_level': 'on',
     }
 
-    response = requests.get(GFS_FILTER_URL, params=params, timeout=120)
-    response.raise_for_status()
+    try:
+        response = requests.get(GFS_FILTER_URL, params=params, timeout=120)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        print(f'GFS readiness check failed for {run_date}_{run_cycle} hour {forecast_hour:02d}: {exc}')
+        return False
     return len(response.content) >= MIN_GFS_READY_BYTES
 
 
 def icon_url_is_ready(url: str) -> bool:
-    response = requests.get(url, stream=True, timeout=120)
     try:
-        response.raise_for_status()
-        return True
-    finally:
-        response.close()
+        response = requests.get(url, stream=True, timeout=120)
+        try:
+            response.raise_for_status()
+            return True
+        finally:
+            response.close()
+    except requests.RequestException as exc:
+        print(f'ICON readiness check failed for {url}: {exc}')
+        return False
 
 
 def build_icon_bg_urls(icon_run: dict[str, str], forecast_hour: int, previous_hour: int | None = None) -> list[str]:
@@ -158,7 +166,12 @@ def latest_runs_are_ready(start_hour: int, end_hour: int, model: str) -> tuple[b
 
     gfs_init_time = None
     if model in ('gfs', 'both'):
-        _, gfs_init_time = get_latest_gfs_dataset()
+        try:
+            _, gfs_init_time = get_latest_gfs_dataset()
+        except (requests.RequestException, RuntimeError, ValueError, OSError) as exc:
+            print(f'Unable to determine latest GFS run: {exc}')
+            return False, status
+
         latest_gfs_stamp = gfs_init_time.strftime('%Y%m%d_%H')
         status['latest_gfs'] = latest_gfs_stamp
 
@@ -173,7 +186,12 @@ def latest_runs_are_ready(start_hour: int, end_hour: int, model: str) -> tuple[b
                 return False, status
 
     if model in ('icon', 'both'):
-        icon_run = get_latest_icon_run(target_time=gfs_init_time if model == 'both' else None)
+        try:
+            icon_run = get_latest_icon_run(target_time=gfs_init_time if model == 'both' else None)
+        except (requests.RequestException, RuntimeError, ValueError, OSError, KeyError) as exc:
+            print(f'Unable to determine latest ICON run: {exc}')
+            return False, status
+
         latest_icon_stamp = icon_run['init_time'].strftime('%Y%m%d_%H')
         status['latest_icon'] = latest_icon_stamp
 
