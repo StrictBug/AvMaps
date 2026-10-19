@@ -2,7 +2,7 @@ name: Build and deploy aviation maps
 
 on:
   schedule:
-    - cron: '15 * * * *'
+    - cron: '15 */2 * * *'
   push:
     branches:
       - main
