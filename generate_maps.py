@@ -469,8 +469,8 @@ def save_output_figure(fig, filepath):
     )
 
 
-def style_height_contour_labels(contour_set, labels, cmap=None, norm=None, darken_factor=0.55):
-    """Keep each label's colormap hue, but darken RGB for readability."""
+def style_height_contour_labels(contour_set, labels, cmap=None, norm=None, darken_factor=0.55, alpha=0.55):
+    """Keep each label's colormap hue, but darken RGB and soften opacity for readability."""
     label_texts = getattr(contour_set, 'labelTexts', None) or list(labels or [])
     label_values = getattr(contour_set, 'labelCValues', None)
 
@@ -487,14 +487,14 @@ def style_height_contour_labels(contour_set, labels, cmap=None, norm=None, darke
             float(base_rgba[0]) * darken_factor,
             float(base_rgba[1]) * darken_factor,
             float(base_rgba[2]) * darken_factor,
-            1.0,
+            float(alpha),
         )
         label.set_color(darker)
-        label.set_alpha(1.0)
+        label.set_alpha(alpha)
         label.set_zorder(50.1)
 
 
-def draw_height_isolines_with_labels(ax, longitude, latitude, height_ft, cmap, norm):
+def draw_height_isolines_with_labels(ax, longitude, latitude, height_ft, cmap, norm, line_alpha=0.5, label_alpha=0.55):
     """Draw 500 ft height isolines and label every second contour (FZL scheme)."""
     contour_levels = np.arange(500, 18000, 500)
     label_levels = contour_levels[1::2]
@@ -505,12 +505,12 @@ def draw_height_isolines_with_labels(ax, longitude, latitude, height_ft, cmap, n
         levels=contour_levels,
         cmap=cmap,
         linewidths=1.0,
-        alpha=0.5,
+        alpha=line_alpha,
         transform=ccrs.PlateCarree(),
         zorder=50,
     )
     labels = ax.clabel(contour_set, levels=label_levels, inline=True, fontsize=9, fmt='%d ft')
-    style_height_contour_labels(contour_set, labels, cmap, norm)
+    style_height_contour_labels(contour_set, labels, cmap, norm, alpha=label_alpha)
     return contour_set
 
 
@@ -2797,7 +2797,7 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             zorder=6.6,
         )
         snow_labels = ax.clabel(cs_snow_level, inline=True, fontsize=9, fmt='%d ft')
-        style_height_contour_labels(cs_snow_level, snow_labels)
+        style_height_contour_labels(cs_snow_level, snow_labels, alpha=0.45)
 
         # Plot 1-hour snow precipitation where WBFL < terrain height
         snow_precip = calculate_snow_precipitation_1h(data)

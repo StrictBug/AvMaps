@@ -3,6 +3,20 @@
         1000, 975, 950, 925, 900, 850, 800, 700, 600, 500, 400, 300, 250, 200, 150, 100,
     ];
 
+    const SOUNDING_MODELS = {
+        gfs_seamless: {
+            id: 'gfs_seamless',
+            label: 'GFS',
+            source: 'Open-Meteo GFS',
+        },
+        icon_seamless: {
+            id: 'icon_seamless',
+            label: 'ICON',
+            source: 'Open-Meteo ICON',
+        },
+    };
+    const DEFAULT_SOUNDING_MODEL = 'gfs_seamless';
+
     const profileCache = new Map();
     const hourlyCache = new Map();
     const MAX_CACHE_ENTRIES = 24;
@@ -17,8 +31,11 @@
     let metaEl;
     let statusEl;
     let canvasEl;
+    let canvasWrapEl;
+    let loadingEl;
     let hoverEl;
     let closeBtn;
+    let modelSelectEl;
     let toolBtn;
     let pinTargets = [];
     let resizeHandleEl;
@@ -27,16 +44,35 @@
     let pinLon = null;
     let toolEnabled = false;
     let panelOpen = false;
+    let selectedModelId = DEFAULT_SOUNDING_MODEL;
     let lastProfile = null;
     let lastPlot = null;
     let lastValidTimeIso = null;
-    // Fixed T/P axes for the current pin so playback doesn't rescale every hour.
+    let lastRequestedValidTime = null;
+    // Fixed T/P axes for the current pin/model so playback doesn't rescale every hour.
     let lockedAxes = null;
     let loadGeneration = 0;
     let storedPanelSizePx = null;
     let resizeRaf = 0;
     let activePointerId = null;
     let hoverRaf = 0;
+    // Device-pixel snapshot of the sounding without the interactive parcel overlay.
+    let staticLayerCanvas = null;
+    let staticLayerWidth = 0;
+    let staticLayerHeight = 0;
+    let lastPointerCss = null;
+    // Zoom/pan window into the default auto-fit extents (cannot exceed that default).
+    let defaultViewExtents = null;
+    let viewExtents = null;
+    let viewSessionKey = null;
+    let isPanning = false;
+    let panLastCss = null;
+    let panPointerId = null;
+    let panRaf = 0;
+    let pendingPanDx = 0;
+    let pendingPanDy = 0;
+    const VIEW_MAX_ZOOM = 10;
+    const PAN_START_PX = 4;
 
     function ensureUi() {
         if (panelEl) {
@@ -47,8 +83,11 @@
         metaEl = document.getElementById('sounding-meta');
         statusEl = document.getElementById('sounding-status');
         canvasEl = document.getElementById('sounding-canvas');
+        canvasWrapEl = document.querySelector('.sounding-canvas-wrap');
+        loadingEl = document.getElementById('sounding-loading');
         hoverEl = document.getElementById('sounding-hover');
         closeBtn = document.getElementById('sounding-close-btn');
+        modelSelectEl = document.getElementById('sounding-model-select');
         toolBtn = document.getElementById('sounding-tool-btn');
         resizeHandleEl = document.getElementById('sounding-resize-handle');
         workspaceEl = document.querySelector('.map-workspace');
@@ -65,6 +104,12 @@
 
         if (closeBtn) {
             closeBtn.addEventListener('click', close);
+        }
+        if (modelSelectEl) {
+            modelSelectEl.value = selectedModelId;
+            modelSelectEl.addEventListener('change', () => {
+                setSelectedModel(modelSelectEl.value, { reload: panelOpen });
+            });
         }
         if (toolBtn) {
             toolBtn.addEventListener('click', () => {
@@ -255,13 +300,60 @@
         return toolEnabled;
     }
 
-    function cacheKey(lat, lon, validTimeIso) {
-        // v4: plot non-null dewpoints; axis includes Td; RH fallback; POST fetch.
-        return `v4:${lat.toFixed(3)},${lon.toFixed(3)},${validTimeIso}`;
+    function normalizeModelId(modelId) {
+        const raw = String(modelId || '').trim().toLowerCase();
+        if (raw === 'icon' || raw === 'icon_seamless' || raw === 'dwd_icon') {
+            return SOUNDING_MODELS.icon_seamless.id;
+        }
+        if (raw === 'gfs' || raw === 'gfs_seamless' || raw === 'ncep_gfs') {
+            return SOUNDING_MODELS.gfs_seamless.id;
+        }
+        if (SOUNDING_MODELS[raw]) {
+            return raw;
+        }
+        return DEFAULT_SOUNDING_MODEL;
     }
 
-    function hourlyCacheKey(lat, lon, dateText) {
-        return `${lat.toFixed(3)},${lon.toFixed(3)},${dateText}`;
+    function getModelMeta(modelId = selectedModelId) {
+        const id = normalizeModelId(modelId);
+        return SOUNDING_MODELS[id] || SOUNDING_MODELS[DEFAULT_SOUNDING_MODEL];
+    }
+
+    function setSelectedModel(modelId, { reload = false } = {}) {
+        const nextModelId = normalizeModelId(modelId);
+        const changed = nextModelId !== selectedModelId;
+        selectedModelId = nextModelId;
+        if (modelSelectEl && modelSelectEl.value !== selectedModelId) {
+            modelSelectEl.value = selectedModelId;
+        }
+        if (!changed && !reload) {
+            return;
+        }
+
+        // Model changes need a fresh axis lock, view window, and profile fetch.
+        lockedAxes = null;
+        lastValidTimeIso = null;
+        lastProfile = null;
+        resetViewExtents();
+        if (
+            reload
+            && panelOpen
+            && Number.isFinite(pinLat)
+            && Number.isFinite(pinLon)
+            && lastRequestedValidTime instanceof Date
+            && !Number.isNaN(lastRequestedValidTime.getTime())
+        ) {
+            loadProfileForPin(lastRequestedValidTime, { showLoading: true });
+        }
+    }
+
+    function cacheKey(lat, lon, validTimeIso, modelId = selectedModelId) {
+        // v5: multi-model (GFS/ICON) profiles.
+        return `v5:${normalizeModelId(modelId)}:${lat.toFixed(3)},${lon.toFixed(3)},${validTimeIso}`;
+    }
+
+    function hourlyCacheKey(lat, lon, dateText, modelId = selectedModelId) {
+        return `${normalizeModelId(modelId)}:${lat.toFixed(3)},${lon.toFixed(3)},${dateText}`;
     }
 
     function rememberProfile(key, profile) {
@@ -390,9 +482,10 @@
 
         levels.sort((a, b) => b.pressure - a.pressure);
 
+        const modelMeta = getModelMeta(model);
         return {
-            source: 'Open-Meteo GFS',
-            model: model || 'gfs_seamless',
+            source: modelMeta.source,
+            model: modelMeta.id,
             validTime: parseUtcHour(hourly.time[hourIndex]),
             latitude: lat,
             longitude: lon,
@@ -401,9 +494,10 @@
         };
     }
 
-    async function fetchOpenMeteoHourly(lat, lon, validTime) {
+    async function fetchOpenMeteoHourly(lat, lon, validTime, modelId = selectedModelId) {
+        const modelMeta = getModelMeta(modelId);
         const startDate = validTime.toISOString().slice(0, 10);
-        const dayKey = hourlyCacheKey(lat, lon, startDate);
+        const dayKey = hourlyCacheKey(lat, lon, startDate, modelMeta.id);
         const cached = hourlyCache.get(dayKey);
         if (cached?.hourly?.time?.length) {
             return cached;
@@ -414,7 +508,7 @@
             latitude: lat.toFixed(4),
             longitude: lon.toFixed(4),
             hourly: buildHourlyVariableList(),
-            models: 'gfs_seamless',
+            models: modelMeta.id,
             wind_speed_unit: 'kn',
             timezone: 'UTC',
             start_date: startDate,
@@ -427,22 +521,22 @@
             body,
         });
         if (!response.ok) {
-            throw new Error(`Open-Meteo request failed (${response.status})`);
+            throw new Error(`Open-Meteo ${modelMeta.label} request failed (${response.status})`);
         }
 
         const payload = await response.json();
         const hourly = payload.hourly;
         if (!hourly?.time?.length) {
-            throw new Error('No hourly profile data returned');
+            throw new Error(`No hourly ${modelMeta.label} profile data returned`);
         }
 
-        const entry = { hourly, model: payload.model || 'gfs_seamless' };
+        const entry = { hourly, model: payload.model || modelMeta.id };
         rememberHourly(dayKey, entry.hourly, entry.model);
         return entry;
     }
 
-    async function fetchOpenMeteoProfile(lat, lon, validTime) {
-        const { hourly, model } = await fetchOpenMeteoHourly(lat, lon, validTime);
+    async function fetchOpenMeteoProfile(lat, lon, validTime, modelId = selectedModelId) {
+        const { hourly, model } = await fetchOpenMeteoHourly(lat, lon, validTime, modelId);
         return buildProfileFromHourly(hourly, model, lat, lon, validTime);
     }
 
@@ -460,6 +554,10 @@
         return thetaK * Math.pow(Math.max(pressureHpa, 1) / P_REF_HPA, KAPPA) - 273.15;
     }
 
+    function potentialTempC(tempC, pressureHpa) {
+        return (tempC + 273.15) * Math.pow(P_REF_HPA / Math.max(pressureHpa, 1), KAPPA) - 273.15;
+    }
+
     function saturationVaporPressureHpa(tempC) {
         // Bolton (1980) over liquid water.
         return 6.112 * Math.exp((17.67 * tempC) / (tempC + 243.5));
@@ -468,6 +566,18 @@
     function saturationMixingRatio(tempC, pressureHpa) {
         const es = saturationVaporPressureHpa(tempC);
         return (EPS * es) / Math.max(pressureHpa - es, 0.1);
+    }
+
+    function dewpointFromMixingRatio(mixingRatio, pressureHpa) {
+        // Invert w = ε e / (p - e) then Magnus-Tetens for Td.
+        if (!Number.isFinite(mixingRatio) || mixingRatio <= 0 || !Number.isFinite(pressureHpa) || pressureHpa <= 0) {
+            return null;
+        }
+        const vaporPressure = (mixingRatio * pressureHpa) / (EPS + mixingRatio);
+        if (!(vaporPressure > 0)) return null;
+        const gamma = Math.log(vaporPressure / 6.112);
+        const dewpoint = (243.5 * gamma) / (17.67 - gamma);
+        return Number.isFinite(dewpoint) ? dewpoint : null;
     }
 
     function moistAdiabatDTdP(tempK, pressureHpa) {
@@ -618,6 +728,157 @@
         return Math.exp(logP);
     }
 
+    function temperatureFromSkewX(x, pressureHpa, plot) {
+        const logP = Math.log(Math.max(pressureHpa, plot.pMin));
+        const skew = (plot.logPMax - logP) * plot.skewFactor;
+        const tNorm = (x - plot.padL - skew) / Math.max(plot.innerW, 1e-6);
+        return plot.tMin + tNorm * (plot.tMax - plot.tMin);
+    }
+
+    function getSurfacePressure(profile = lastProfile) {
+        const surface = profile?.levels?.find((level) => level.isSurface);
+        if (Number.isFinite(surface?.pressure)) {
+            return surface.pressure;
+        }
+        let maxP = null;
+        (profile?.levels || []).forEach((level) => {
+            if (!Number.isFinite(level?.pressure)) return;
+            maxP = maxP == null ? level.pressure : Math.max(maxP, level.pressure);
+        });
+        return maxP;
+    }
+
+    function heightMetersFromPressure(profile, pressure) {
+        if (!Number.isFinite(pressure) || !profile?.levels?.length) return null;
+        const levels = profile.levels
+            .filter((level) => Number.isFinite(level.pressure) && Number.isFinite(level.height) && level.pressure > 0)
+            .slice()
+            .sort((a, b) => b.pressure - a.pressure);
+        if (!levels.length) return null;
+        if (pressure >= levels[0].pressure) return levels[0].height;
+        if (pressure <= levels[levels.length - 1].pressure) return levels[levels.length - 1].height;
+
+        for (let i = 0; i < levels.length - 1; i += 1) {
+            const lo = levels[i];
+            const hi = levels[i + 1];
+            if (pressure <= lo.pressure && pressure >= hi.pressure) {
+                const logP = Math.log(pressure);
+                const logLo = Math.log(lo.pressure);
+                const logHi = Math.log(hi.pressure);
+                const frac = (logLo - logP) / Math.max(logLo - logHi, 1e-9);
+                return lo.height + frac * (hi.height - lo.height);
+            }
+        }
+        return null;
+    }
+
+    function buildLiftedParcelPath(cursorTempC, cursorPressureHpa, surfacePressureHpa, plot) {
+        if (
+            !Number.isFinite(cursorTempC)
+            || !Number.isFinite(cursorPressureHpa)
+            || !Number.isFinite(surfacePressureHpa)
+            || cursorPressureHpa >= surfacePressureHpa - 0.5
+        ) {
+            return null;
+        }
+
+        // Cursor is the assumed LCL: dry adiabat through the cursor down to the surface,
+        // then saturated adiabat upward. Mixing ratio is saturation value at the cursor.
+        const thetaC = potentialTempC(cursorTempC, cursorPressureHpa);
+        const mixingRatio = saturationMixingRatio(cursorTempC, cursorPressureHpa);
+        const pStep = 4;
+        const dryPoints = [];
+        const mixingRatioPoints = [];
+        for (let p = surfacePressureHpa; p >= cursorPressureHpa; p -= pStep) {
+            const pressure = Math.max(p, cursorPressureHpa);
+            dryPoints.push({
+                temperature: dryAdiabatTempC(thetaC, pressure),
+                pressure,
+            });
+            const dewpoint = dewpointFromMixingRatio(mixingRatio, pressure);
+            if (Number.isFinite(dewpoint)) {
+                mixingRatioPoints.push({ temperature: dewpoint, pressure });
+            }
+        }
+        const dryEnd = dryPoints[dryPoints.length - 1];
+        if (!dryEnd || Math.abs(dryEnd.pressure - cursorPressureHpa) > 0.05) {
+            dryPoints.push({ temperature: cursorTempC, pressure: cursorPressureHpa });
+        } else {
+            dryEnd.temperature = cursorTempC;
+            dryEnd.pressure = cursorPressureHpa;
+        }
+        const mixEnd = mixingRatioPoints[mixingRatioPoints.length - 1];
+        if (!mixEnd || Math.abs(mixEnd.pressure - cursorPressureHpa) > 0.05) {
+            mixingRatioPoints.push({ temperature: cursorTempC, pressure: cursorPressureHpa });
+        } else {
+            mixEnd.temperature = cursorTempC;
+            mixEnd.pressure = cursorPressureHpa;
+        }
+
+        const moistPoints = integrateMoistAdiabat(
+            cursorTempC,
+            cursorPressureHpa,
+            Math.max(plot.pMin, 100),
+            pStep,
+        );
+        // Avoid duplicating the LCL point when concatenating.
+        return {
+            parcelPoints: dryPoints.concat(moistPoints.slice(1)),
+            mixingRatioPoints,
+        };
+    }
+
+    function captureStaticLayer() {
+        if (!canvasEl) return;
+        if (!staticLayerCanvas) {
+            staticLayerCanvas = document.createElement('canvas');
+        }
+        staticLayerWidth = canvasEl.width;
+        staticLayerHeight = canvasEl.height;
+        staticLayerCanvas.width = staticLayerWidth;
+        staticLayerCanvas.height = staticLayerHeight;
+        const staticCtx = staticLayerCanvas.getContext('2d');
+        staticCtx.setTransform(1, 0, 0, 1, 0, 0);
+        staticCtx.clearRect(0, 0, staticLayerWidth, staticLayerHeight);
+        staticCtx.drawImage(canvasEl, 0, 0);
+    }
+
+    function restoreStaticLayer(ctx) {
+        if (!staticLayerCanvas || !staticLayerWidth || !staticLayerHeight) return false;
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+        ctx.drawImage(staticLayerCanvas, 0, 0);
+        return true;
+    }
+
+    function drawLiftedParcelOverlay(ctx, plot, parcelPoints, mixingRatioPoints) {
+        if (!parcelPoints?.length && !mixingRatioPoints?.length) return;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(plot.padL, plot.padT, plot.innerW, plot.innerH);
+        ctx.clip();
+
+        // Constant mixing ratio from the surface up to the assumed LCL (cursor).
+        if (mixingRatioPoints?.length) {
+            ctx.strokeStyle = 'rgba(30, 160, 185, 0.9)';
+            ctx.lineWidth = 1.45;
+            ctx.setLineDash([5, 4]);
+            strokeThermoCurve(ctx, mixingRatioPoints, plot);
+            ctx.setLineDash([]);
+        }
+
+        // Lifted parcel: dry adiabat to LCL, then moist adiabat above.
+        if (parcelPoints?.length) {
+            ctx.strokeStyle = 'rgba(20, 150, 70, 0.92)';
+            ctx.lineWidth = 1.7;
+            ctx.setLineDash([6, 4]);
+            strokeThermoCurve(ctx, parcelPoints, plot);
+            ctx.setLineDash([]);
+        }
+        ctx.restore();
+    }
+
     function nearestProfileLevel(levels, pressure) {
         if (!Number.isFinite(pressure) || !levels?.length) return null;
         const logP = Math.log(pressure);
@@ -666,13 +927,22 @@
     }
 
     function hideHoverReadout() {
-        if (!hoverEl) return;
-        hoverEl.classList.add('hidden');
-        hoverEl.innerHTML = '';
+        if (hoverEl) {
+            hoverEl.classList.add('hidden');
+            hoverEl.innerHTML = '';
+        }
+        lastPointerCss = null;
+        // Restore the base sounding when the interactive parcel overlay clears.
+        if (canvasEl && staticLayerCanvas) {
+            const ctx = canvasEl.getContext('2d');
+            restoreStaticLayer(ctx);
+            const dpr = window.devicePixelRatio || 1;
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        }
     }
 
     function updateHoverReadout(clientX, clientY) {
-        if (!canvasEl || !hoverEl || !lastPlot || !lastProfile?.levels?.length) {
+        if (!canvasEl || !lastPlot || !lastProfile?.levels?.length) {
             hideHoverReadout();
             return;
         }
@@ -680,6 +950,7 @@
         const rect = canvasEl.getBoundingClientRect();
         const x = clientX - rect.left;
         const y = clientY - rect.top;
+        lastPointerCss = { x, y };
         if (
             x < lastPlot.padL
             || x > lastPlot.padL + lastPlot.innerW
@@ -691,39 +962,136 @@
         }
 
         const pressure = pressureFromY(y, lastPlot);
+        const cursorTempC = temperatureFromSkewX(x, pressure, lastPlot);
         const level = nearestProfileLevel(lastProfile.levels, pressure);
-        if (!level) {
-            hideHoverReadout();
-            return;
+        const cursorHeightM = heightMetersFromPressure(lastProfile, pressure);
+        const surfacePressure = getSurfacePressure(lastProfile);
+        const parcelPath = buildLiftedParcelPath(
+            cursorTempC,
+            pressure,
+            surfacePressure,
+            lastPlot,
+        );
+
+        const ctx = canvasEl.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        if (restoreStaticLayer(ctx)) {
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            if (parcelPath) {
+                drawLiftedParcelOverlay(
+                    ctx,
+                    lastPlot,
+                    parcelPath.parcelPoints,
+                    parcelPath.mixingRatioPoints,
+                );
+            }
         }
 
-        hoverEl.innerHTML = formatHoverReadout({
-            pressure: level.pressure,
-            temperature: level.temperature,
-            heightM: level.height,
-            windDirDeg: level.windDirDeg,
-            windSpeedKt: level.windSpeedKt,
-        });
-        hoverEl.classList.remove('hidden');
+        if (hoverEl) {
+            hoverEl.innerHTML = formatHoverReadout({
+                pressure,
+                temperature: Number.isFinite(level?.temperature) ? level.temperature : cursorTempC,
+                heightM: Number.isFinite(cursorHeightM) ? cursorHeightM : level?.height,
+                windDirDeg: level?.windDirDeg,
+                windSpeedKt: level?.windSpeedKt,
+            });
+            hoverEl.classList.remove('hidden');
 
-        const tipW = hoverEl.offsetWidth || 160;
-        const tipH = hoverEl.offsetHeight || 72;
-        let left = x + 12;
-        let top = y + 12;
-        if (left + tipW > rect.width - 4) left = x - tipW - 12;
-        if (top + tipH > rect.height - 4) top = y - tipH - 12;
-        left = Math.max(4, Math.min(left, rect.width - tipW - 4));
-        top = Math.max(4, Math.min(top, rect.height - tipH - 4));
-        hoverEl.style.left = `${left}px`;
-        hoverEl.style.top = `${top}px`;
+            const tipW = hoverEl.offsetWidth || 160;
+            const tipH = hoverEl.offsetHeight || 72;
+            let left = x + 12;
+            let top = y + 12;
+            if (left + tipW > rect.width - 4) left = x - tipW - 12;
+            if (top + tipH > rect.height - 4) top = y - tipH - 12;
+            left = Math.max(4, Math.min(left, rect.width - tipW - 4));
+            top = Math.max(4, Math.min(top, rect.height - tipH - 4));
+            hoverEl.style.left = `${left}px`;
+            hoverEl.style.top = `${top}px`;
+        }
+    }
+
+    function pointerCssPosition(event) {
+        const rect = canvasEl.getBoundingClientRect();
+        return {
+            x: event.clientX - rect.left,
+            y: event.clientY - rect.top,
+            clientX: event.clientX,
+            clientY: event.clientY,
+        };
+    }
+
+    function isInsidePlot(x, y, plot = lastPlot) {
+        if (!plot) return false;
+        return (
+            x >= plot.padL
+            && x <= plot.padL + plot.innerW
+            && y >= plot.padT
+            && y <= plot.padT + plot.innerH
+        );
+    }
+
+    function endPanInteraction() {
+        isPanning = false;
+        panLastCss = null;
+        panPointerId = null;
+        pendingPanDx = 0;
+        pendingPanDy = 0;
+        if (panRaf) {
+            cancelAnimationFrame(panRaf);
+            panRaf = 0;
+        }
+        canvasEl?.classList.remove('is-panning');
     }
 
     function bindHoverInteractions() {
         if (!canvasEl || canvasEl.dataset.hoverBound === '1') return;
         canvasEl.dataset.hoverBound = '1';
 
+        canvasEl.addEventListener('wheel', (event) => {
+            if (!panelOpen || !lastProfile || !lastPlot) return;
+            const { x, y } = pointerCssPosition(event);
+            if (!isInsidePlot(x, y)) return;
+            event.preventDefault();
+            // Scroll up zooms in; scroll down zooms out, but never beyond the default extents.
+            const factor = event.deltaY > 0 ? 1.06 : 1 / 1.06;
+            zoomViewAt(x, y, factor);
+        }, { passive: false });
+
+        canvasEl.addEventListener('pointerdown', (event) => {
+            if (!panelOpen || !lastProfile || !lastPlot) return;
+            if (event.button != null && event.button !== 0) return;
+            const pos = pointerCssPosition(event);
+            if (!isInsidePlot(pos.x, pos.y)) return;
+            panPointerId = event.pointerId;
+            panLastCss = pos;
+            isPanning = false;
+            try {
+                canvasEl.setPointerCapture(event.pointerId);
+            } catch (_err) {
+                // ignore
+            }
+        });
+
         canvasEl.addEventListener('pointermove', (event) => {
             if (!panelOpen || !lastProfile) return;
+            const pos = pointerCssPosition(event);
+
+            if (panPointerId != null && event.pointerId === panPointerId && panLastCss) {
+                const dx = pos.x - panLastCss.x;
+                const dy = pos.y - panLastCss.y;
+                if (!isPanning && (Math.abs(dx) > PAN_START_PX || Math.abs(dy) > PAN_START_PX)) {
+                    isPanning = true;
+                    canvasEl.classList.add('is-panning');
+                    hideHoverReadout();
+                }
+                if (isPanning) {
+                    panViewByPixels(dx, dy);
+                    panLastCss = pos;
+                    return;
+                }
+            }
+
+            if (isPanning) return;
             const { clientX, clientY } = event;
             if (hoverRaf) cancelAnimationFrame(hoverRaf);
             hoverRaf = requestAnimationFrame(() => {
@@ -732,7 +1100,36 @@
             });
         });
 
+        canvasEl.addEventListener('pointerup', (event) => {
+            if (panPointerId != null && event.pointerId === panPointerId) {
+                const wasPanning = isPanning;
+                endPanInteraction();
+                try {
+                    canvasEl.releasePointerCapture(event.pointerId);
+                } catch (_err) {
+                    // ignore
+                }
+                if (!wasPanning) {
+                    updateHoverReadout(event.clientX, event.clientY);
+                }
+            }
+        });
+
+        canvasEl.addEventListener('pointercancel', () => {
+            endPanInteraction();
+        });
+
+        canvasEl.addEventListener('dblclick', (event) => {
+            if (!panelOpen || !lastProfile || !lastPlot) return;
+            const { x, y } = pointerCssPosition(event);
+            if (!isInsidePlot(x, y)) return;
+            event.preventDefault();
+            viewExtents = null;
+            renderSkewT(lastProfile);
+        });
+
         canvasEl.addEventListener('pointerleave', () => {
+            if (isPanning) return;
             if (hoverRaf) {
                 cancelAnimationFrame(hoverRaf);
                 hoverRaf = 0;
@@ -865,23 +1262,25 @@
         };
     }
 
-    function pinMatchesLockedAxes(lat, lon) {
+    function pinMatchesLockedAxes(lat, lon, modelId = selectedModelId) {
         if (!lockedAxes) return false;
         return (
             Math.abs(lockedAxes.lat - lat) < 1e-4
             && Math.abs(lockedAxes.lon - lon) < 1e-4
+            && lockedAxes.model === normalizeModelId(modelId)
         );
     }
 
-    function updateLockedAxesFromHourly(hourly, lat, lon) {
+    function updateLockedAxesFromHourly(hourly, lat, lon, modelId = selectedModelId) {
         const width = canvasEl?.clientWidth || 640;
         const height = canvasEl?.clientHeight || 520;
+        const model = normalizeModelId(modelId);
         const dayAxes = computeAxesFromHourly(hourly, width, height);
-        if (!pinMatchesLockedAxes(lat, lon)) {
-            lockedAxes = { ...dayAxes, lat, lon };
+        if (!pinMatchesLockedAxes(lat, lon, model)) {
+            lockedAxes = { ...dayAxes, lat, lon, model };
             return lockedAxes;
         }
-        lockedAxes = { ...mergeLockedAxes(lockedAxes, dayAxes), lat, lon };
+        lockedAxes = { ...mergeLockedAxes(lockedAxes, dayAxes), lat, lon, model };
         return lockedAxes;
     }
 
@@ -968,6 +1367,161 @@
         plot.tMin = temps.tMin;
         plot.tMax = temps.tMax;
         return plot;
+    }
+
+    function makeViewSessionKey(profile) {
+        return [
+            normalizeModelId(profile?.model || selectedModelId),
+            Number.isFinite(profile?.latitude) ? profile.latitude.toFixed(3) : '',
+            Number.isFinite(profile?.longitude) ? profile.longitude.toFixed(3) : '',
+        ].join(':');
+    }
+
+    function copyExtents(extents) {
+        if (!extents) return null;
+        return {
+            pMin: extents.pMin,
+            pMax: extents.pMax,
+            tMin: extents.tMin,
+            tMax: extents.tMax,
+        };
+    }
+
+    function resetViewExtents() {
+        viewExtents = null;
+        defaultViewExtents = null;
+        viewSessionKey = null;
+    }
+
+    function clampViewToDefault(view, defaults) {
+        if (!view || !defaults) return copyExtents(defaults);
+
+        const defTSpan = Math.max(defaults.tMax - defaults.tMin, 1e-6);
+        const defLogPMin = Math.log(defaults.pMin);
+        const defLogPMax = Math.log(defaults.pMax);
+        const defLogSpan = Math.max(defLogPMax - defLogPMin, 1e-6);
+        const minTSpan = defTSpan / VIEW_MAX_ZOOM;
+        const minLogSpan = defLogSpan / VIEW_MAX_ZOOM;
+
+        let tMin = view.tMin;
+        let tMax = view.tMax;
+        let tSpan = tMax - tMin;
+        if (!(tSpan > 0) || tSpan > defTSpan) {
+            tMin = defaults.tMin;
+            tMax = defaults.tMax;
+            tSpan = defTSpan;
+        } else if (tSpan < minTSpan) {
+            const mid = (tMin + tMax) / 2;
+            tMin = mid - minTSpan / 2;
+            tMax = mid + minTSpan / 2;
+            tSpan = minTSpan;
+        }
+        if (tMin < defaults.tMin) {
+            tMax += defaults.tMin - tMin;
+            tMin = defaults.tMin;
+        }
+        if (tMax > defaults.tMax) {
+            tMin -= tMax - defaults.tMax;
+            tMax = defaults.tMax;
+        }
+        tMin = Math.max(defaults.tMin, Math.min(tMin, defaults.tMax - tSpan));
+        tMax = tMin + tSpan;
+
+        let logPMin = Math.log(Math.max(view.pMin, 1e-6));
+        let logPMax = Math.log(Math.max(view.pMax, 1e-6));
+        let logSpan = logPMax - logPMin;
+        if (!(logSpan > 0) || logSpan > defLogSpan) {
+            logPMin = defLogPMin;
+            logPMax = defLogPMax;
+            logSpan = defLogSpan;
+        } else if (logSpan < minLogSpan) {
+            const mid = (logPMin + logPMax) / 2;
+            logPMin = mid - minLogSpan / 2;
+            logPMax = mid + minLogSpan / 2;
+            logSpan = minLogSpan;
+        }
+        if (logPMin < defLogPMin) {
+            logPMax += defLogPMin - logPMin;
+            logPMin = defLogPMin;
+        }
+        if (logPMax > defLogPMax) {
+            logPMin -= logPMax - defLogPMax;
+            logPMax = defLogPMax;
+        }
+        logPMin = Math.max(defLogPMin, Math.min(logPMin, defLogPMax - logSpan));
+        logPMax = logPMin + logSpan;
+
+        return {
+            pMin: Math.exp(logPMin),
+            pMax: Math.exp(logPMax),
+            tMin,
+            tMax,
+        };
+    }
+
+    function applyViewExtentsToPlot(plot, extents) {
+        if (!plot || !extents) return plot;
+        plot.pMin = extents.pMin;
+        plot.pMax = extents.pMax;
+        plot.tMin = extents.tMin;
+        plot.tMax = extents.tMax;
+        plot.logPMin = Math.log(plot.pMin);
+        plot.logPMax = Math.log(plot.pMax);
+        const logSpan = Math.max(plot.logPMax - plot.logPMin, 1e-6);
+        plot.skewFactor = Math.min(plot.innerH * 0.92, plot.innerW * 0.92) / logSpan;
+        return plot;
+    }
+
+    function zoomViewAt(cssX, cssY, factor) {
+        if (!lastPlot || !defaultViewExtents || !lastProfile) return;
+        const current = clampViewToDefault(viewExtents || defaultViewExtents, defaultViewExtents);
+        const pressure = pressureFromY(cssY, lastPlot);
+        const tempC = temperatureFromSkewX(cssX, pressure, lastPlot);
+        const logPMin = Math.log(current.pMin);
+        const logPMax = Math.log(current.pMax);
+        const logSpan = Math.max(logPMax - logPMin, 1e-6);
+        const tSpan = Math.max(current.tMax - current.tMin, 1e-6);
+        const fracP = (Math.log(Math.max(pressure, 1e-6)) - logPMin) / logSpan;
+        const fracT = (tempC - current.tMin) / tSpan;
+        const nextLogSpan = logSpan * factor;
+        const nextTSpan = tSpan * factor;
+        const nextLogPMin = Math.log(Math.max(pressure, 1e-6)) - fracP * nextLogSpan;
+        viewExtents = clampViewToDefault({
+            pMin: Math.exp(nextLogPMin),
+            pMax: Math.exp(nextLogPMin + nextLogSpan),
+            tMin: tempC - fracT * nextTSpan,
+            tMax: tempC - fracT * nextTSpan + nextTSpan,
+        }, defaultViewExtents);
+        renderSkewT(lastProfile, { preserveHover: false });
+    }
+
+    function panViewByPixels(dxCss, dyCss) {
+        pendingPanDx += dxCss;
+        pendingPanDy += dyCss;
+        if (panRaf) return;
+        panRaf = requestAnimationFrame(() => {
+            panRaf = 0;
+            const dx = pendingPanDx;
+            const dy = pendingPanDy;
+            pendingPanDx = 0;
+            pendingPanDy = 0;
+            if (!lastPlot || !defaultViewExtents || !lastProfile) return;
+            if (dx === 0 && dy === 0) return;
+            const current = clampViewToDefault(viewExtents || defaultViewExtents, defaultViewExtents);
+            const tPerPx = (current.tMax - current.tMin) / Math.max(lastPlot.innerW, 1e-6);
+            const logSpan = Math.log(current.pMax) - Math.log(current.pMin);
+            const logPPerPx = logSpan / Math.max(lastPlot.innerH, 1e-6);
+            // Drag right/down moves the content with the pointer.
+            const dT = -dx * tPerPx;
+            const dLogP = -dy * logPPerPx;
+            viewExtents = clampViewToDefault({
+                pMin: Math.exp(Math.log(current.pMin) + dLogP),
+                pMax: Math.exp(Math.log(current.pMax) + dLogP),
+                tMin: current.tMin + dT,
+                tMax: current.tMax + dT,
+            }, defaultViewExtents);
+            renderSkewT(lastProfile, { preserveHover: false });
+        });
     }
 
     function drawBackground(ctx, plot) {
@@ -1162,11 +1716,17 @@
         }
     }
 
-    function renderSkewT(profile) {
+    function renderSkewT(profile, { preserveHover = false } = {}) {
         ensureUi();
         if (!canvasEl || !profile?.levels?.length) return;
         lastProfile = profile;
-        hideHoverReadout();
+        if (!preserveHover) {
+            lastPointerCss = null;
+            if (hoverEl) {
+                hoverEl.classList.add('hidden');
+                hoverEl.innerHTML = '';
+            }
+        }
 
         const width = canvasEl.clientWidth || 640;
         const height = canvasEl.clientHeight || 520;
@@ -1177,10 +1737,29 @@
         const ctx = canvasEl.getContext('2d');
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-        const axesLock = pinMatchesLockedAxes(profile.latitude, profile.longitude)
+        const axesLock = pinMatchesLockedAxes(profile.latitude, profile.longitude, profile.model)
             ? lockedAxes
             : null;
-        const plot = buildPlotLayout(width, height, profile.levels, axesLock);
+        const basePlot = buildPlotLayout(width, height, profile.levels, axesLock);
+        const baseExtents = {
+            pMin: basePlot.pMin,
+            pMax: basePlot.pMax,
+            tMin: basePlot.tMin,
+            tMax: basePlot.tMax,
+        };
+        const sessionKey = makeViewSessionKey(profile);
+        if (sessionKey !== viewSessionKey) {
+            viewSessionKey = sessionKey;
+            viewExtents = null;
+        }
+        // Hard clamp boundary is the current auto-fit / locked-axes window (includes the ground).
+        defaultViewExtents = copyExtents(baseExtents);
+
+        let plot = basePlot;
+        if (viewExtents) {
+            viewExtents = clampViewToDefault(viewExtents, defaultViewExtents);
+            plot = applyViewExtentsToPlot(basePlot, viewExtents);
+        }
         lastPlot = plot;
         // Default SH for this AU-focused viewer; follow profile latitude when available.
         const southernHemisphere = !(Number.isFinite(profile.latitude) && profile.latitude > 0);
@@ -1208,6 +1787,9 @@
             );
             lastBarbY = y;
         });
+
+        // Snapshot the base diagram so hover can overlay a parcel path cheaply.
+        captureStaticLayer();
     }
 
     function placePinOnTarget(target, offsetX, offsetY) {
@@ -1261,6 +1843,15 @@
         return `${Math.abs(lat).toFixed(2)}°${latHem}, ${Math.abs(lon).toFixed(2)}°${lonHem}`;
     }
 
+    function setSoundingLoading(visible) {
+        ensureUi();
+        if (loadingEl) {
+            loadingEl.classList.toggle('hidden', !visible);
+            loadingEl.setAttribute('aria-hidden', visible ? 'false' : 'true');
+        }
+        canvasWrapEl?.classList.toggle('is-loading', Boolean(visible));
+    }
+
     async function loadProfileForPin(validTime, { showLoading = true } = {}) {
         ensureUi();
         if (!panelOpen || !Number.isFinite(pinLat) || !Number.isFinite(pinLon)) {
@@ -1270,8 +1861,15 @@
             return;
         }
 
+        const modelMeta = getModelMeta(selectedModelId);
         const validTimeIso = validTime.toISOString();
-        if (validTimeIso === lastValidTimeIso && lastProfile) {
+        lastRequestedValidTime = validTime;
+        if (
+            validTimeIso === lastValidTimeIso
+            && lastProfile
+            && lastProfile.model === modelMeta.id
+        ) {
+            setSoundingLoading(false);
             return;
         }
 
@@ -1279,14 +1877,22 @@
         lastValidTimeIso = validTimeIso;
 
         if (showLoading) {
-            metaEl.textContent = `${formatLatLon(pinLat, pinLon)} · fetching GFS profile…`;
-            statusEl.textContent = 'Loading sounding…';
-            statusEl.classList.remove('error');
+            // Keep layout stable: grey the existing diagram and show a spinner overlay
+            // instead of injecting status text that resizes the panel.
+            if (metaEl && (!metaEl.textContent || metaEl.textContent.includes('balloon tool') || metaEl.textContent.includes('Click a map'))) {
+                metaEl.textContent = formatLatLon(pinLat, pinLon);
+            }
+            if (statusEl) {
+                statusEl.textContent = '';
+                statusEl.classList.remove('error');
+            }
+            setSoundingLoading(true);
+            hideHoverReadout();
         }
 
-        const key = cacheKey(pinLat, pinLon, validTimeIso);
+        const key = cacheKey(pinLat, pinLon, validTimeIso, modelMeta.id);
         try {
-            const { hourly, model } = await fetchOpenMeteoHourly(pinLat, pinLon, validTime);
+            const { hourly, model } = await fetchOpenMeteoHourly(pinLat, pinLon, validTime, modelMeta.id);
             let profile = profileCache.get(key);
             if (!profile) {
                 profile = buildProfileFromHourly(hourly, model, pinLat, pinLon, validTime);
@@ -1299,23 +1905,29 @@
             }
 
             // Lock / expand axes from the full day at this pin so animation stays stable.
-            updateLockedAxesFromHourly(hourly, pinLat, pinLon);
+            updateLockedAxesFromHourly(hourly, pinLat, pinLon, modelMeta.id);
 
             metaEl.textContent = (
                 `${formatLatLon(pinLat, pinLon)} · Valid ${profile.validTime.toISOString().replace('.000Z', 'Z')} · `
                 + `${profile.source}`
             );
-            statusEl.textContent = '';
-            statusEl.classList.remove('error');
+            if (statusEl) {
+                statusEl.textContent = '';
+                statusEl.classList.remove('error');
+            }
             renderSkewT(profile);
+            setSoundingLoading(false);
         } catch (error) {
             if (generation !== loadGeneration) {
                 return;
             }
             console.warn('Sounding fetch failed:', error);
             lastProfile = null;
-            statusEl.textContent = error?.message || 'Unable to load sounding';
-            statusEl.classList.add('error');
+            setSoundingLoading(false);
+            if (statusEl) {
+                statusEl.textContent = error?.message || 'Unable to load sounding';
+                statusEl.classList.add('error');
+            }
             const ctx = canvasEl?.getContext('2d');
             if (ctx && canvasEl) {
                 ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
@@ -1323,7 +1935,7 @@
         }
     }
 
-    async function openAt({ lat, lon, validTime, mapImg, offsetX, offsetY }) {
+    async function openAt({ lat, lon, validTime, model, mapImg, offsetX, offsetY }) {
         ensureUi();
         if (!panelEl || !toolEnabled) return;
 
@@ -1331,6 +1943,10 @@
         pinLon = lon;
         lastValidTimeIso = null;
         lockedAxes = null;
+        resetViewExtents();
+        if (model != null) {
+            setSelectedModel(model, { reload: false });
+        }
 
         panelEl.classList.remove('hidden');
         panelEl.setAttribute('aria-hidden', 'false');
@@ -1376,7 +1992,11 @@
         lastProfile = null;
         lastPlot = null;
         lastValidTimeIso = null;
+        lastRequestedValidTime = null;
         lockedAxes = null;
+        resetViewExtents();
+        endPanInteraction();
+        setSoundingLoading(false);
         hideHoverReadout();
         if (metaEl) {
             metaEl.textContent = toolEnabled
@@ -1396,10 +2016,18 @@
         return panelOpen;
     }
 
+    function getPinLocation() {
+        if (!panelOpen || !Number.isFinite(pinLat) || !Number.isFinite(pinLon)) {
+            return null;
+        }
+        return { lat: pinLat, lon: pinLon };
+    }
+
     window.SoundingViewer = {
         openAt,
         close,
         isOpen,
+        getPinLocation,
         isToolEnabled,
         setToolEnabled,
         renderSkewT,

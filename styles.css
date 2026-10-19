@@ -1286,6 +1286,48 @@ body.sounding-resizing .image-panel img {
     line-height: 1.35;
 }
 
+.sounding-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.sounding-model-picker {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin: 0;
+    color: #5b6b7c;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.sounding-model-picker-label {
+    line-height: 1;
+}
+
+.sounding-model-select {
+    appearance: none;
+    border: 1px solid #c5ced9;
+    border-radius: 4px;
+    background: #ffffff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%235b6b7c' d='M1 1l4 4 4-4'/%3E%3C/svg%3E") no-repeat right 6px center;
+    color: #1f2a37;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+    padding: 4px 20px 4px 7px;
+    cursor: pointer;
+}
+
+.sounding-model-select:hover,
+.sounding-model-select:focus-visible {
+    border-color: #8a93a1;
+    outline: none;
+}
+
 .sounding-close-btn {
     border: none;
     background: transparent;
@@ -1323,6 +1365,42 @@ body.sounding-resizing .image-panel img {
     flex-direction: column;
 }
 
+.sounding-canvas-wrap.is-loading .sounding-canvas {
+    filter: grayscale(0.4) brightness(0.96);
+    opacity: 0.55;
+}
+
+.sounding-loading {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    background: rgba(244, 247, 251, 0.35);
+    pointer-events: none;
+}
+
+.sounding-loading.hidden {
+    display: none;
+}
+
+.sounding-loading-spinner {
+    width: 28px;
+    height: 28px;
+    border: 2.5px solid rgba(90, 110, 140, 0.22);
+    border-top-color: rgba(55, 95, 170, 0.95);
+    border-radius: 50%;
+    animation: sounding-spin 0.7s linear infinite;
+}
+
+@keyframes sounding-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 .sounding-canvas {
     width: 100%;
     flex: 1;
@@ -1330,7 +1408,12 @@ body.sounding-resizing .image-panel img {
     border: 1px solid #d5dde8;
     border-radius: 4px;
     background: #f4f7fb;
+    touch-action: none;
     cursor: crosshair;
+}
+
+.sounding-canvas.is-panning {
+    cursor: grabbing;
 }
 
 .sounding-hover {

@@ -1199,6 +1199,16 @@ function getDomainGeoref(domainId = currentDomain) {
     return { extent, axesFraction };
 }
 
+function isLonLatInDomain(lon, lat, domainId) {
+    const georef = getDomainGeoref(domainId);
+    if (!georef || !Number.isFinite(lon) || !Number.isFinite(lat)) {
+        return false;
+    }
+    const { extent } = georef;
+    return lon >= extent.lonMin && lon <= extent.lonMax
+        && lat >= extent.latMin && lat <= extent.latMax;
+}
+
 function mapClickToLonLat(img, clientX, clientY) {
     const georef = getDomainGeoref();
     if (!georef) {
@@ -1338,6 +1348,14 @@ function lonLatToImageOffsets(img, lon, lat, domainId = currentDomain) {
     };
 }
 
+function defaultSoundingModelForMapImage(img) {
+    // Only the Fog & Low Cloud right panel is ICON; all other maps are GFS products.
+    if (currentCategory === 'BG' && img?.id === 'right-image') {
+        return 'icon';
+    }
+    return 'gfs';
+}
+
 function handleMapClick(event) {
     if (!window.SoundingViewer || typeof window.SoundingViewer.openAt !== 'function') {
         return;
@@ -1363,6 +1381,7 @@ function handleMapClick(event) {
         lat: mapped.lat,
         lon: mapped.lon,
         validTime,
+        model: defaultSoundingModelForMapImage(img),
         mapImg: img,
         offsetX: mapped.offsetX,
         offsetY: mapped.offsetY,
@@ -1455,12 +1474,25 @@ async function switchDomain(domainId) {
         animationInterval = null;
     }
 
-    // Pin/georef are domain-specific; drop the sounding rather than leave a stale marker.
-    window.SoundingViewer?.close?.();
+    // Keep an open sounding when the pin still falls inside the destination domain;
+    // otherwise drop it so we don't leave a stale off-map marker.
+    const pin = window.SoundingViewer?.isOpen?.()
+        ? window.SoundingViewer.getPinLocation?.()
+        : null;
+    const keepSounding = Boolean(pin && isLonLatInDomain(pin.lon, pin.lat, domainId));
+    if (window.SoundingViewer?.isOpen?.() && !keepSounding) {
+        window.SoundingViewer.close();
+    }
 
     currentDomain = domainId;
     if (mobileDomainSelect) mobileDomainSelect.value = domainId;
     await loadSelection(true);
+
+    if (keepSounding) {
+        requestAnimationFrame(() => {
+            window.SoundingViewer?.syncPin?.();
+        });
+    }
 
     if (wasPlaying) {
         startAnimation();
@@ -1564,10 +1596,12 @@ function setupEventListeners() {
 
     leftImage.addEventListener('load', function() {
         this.classList.add('loaded');
+        window.SoundingViewer?.syncPin?.();
     });
 
     rightImage.addEventListener('load', function() {
         this.classList.add('loaded');
+        window.SoundingViewer?.syncPin?.();
     });
 
     leftImage.addEventListener('error', function() {
@@ -1617,11 +1651,9 @@ function setupEventListeners() {
             return;
         }
 
-        if (window.SoundingViewer?.isOpen?.()) {
-            if (event.key === 'Escape') {
-                window.SoundingViewer.close();
-                event.preventDefault();
-            }
+        if (window.SoundingViewer?.isOpen?.() && event.key === 'Escape') {
+            window.SoundingViewer.close();
+            event.preventDefault();
             return;
         }
 
@@ -1630,6 +1662,8 @@ function setupEventListeners() {
             return;
         }
 
+        // Domain/category/playback hotkeys stay active while a sounding is open.
+        // switchDomain keeps the sounding if the pin is inside the new domain.
         if (event.key in domainHotkeys) {
             switchDomain(domainHotkeys[event.key]);
             event.preventDefault();
