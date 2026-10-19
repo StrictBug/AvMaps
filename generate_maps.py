@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 import os
 import shutil
 import tempfile
+import time
 import requests
 import re
 from concurrent.futures import ThreadPoolExecutor
@@ -63,11 +64,35 @@ DOMAIN_DEFINITIONS = {
 }
 DEFAULT_DOMAIN_IDS = tuple(DOMAIN_DEFINITIONS.keys())
 
+# BG stays a simple left/right pair. Other categories use a 2x2 grid:
+#   top-left / bottom-left = GFS products, top-right / bottom-right = ICON.
 CATEGORY_PANEL_DIRS = {
-    'BG': ('BG/US', 'BG/ICON'),
-    'TS': ('TS/Flash density', 'TS/Severe storm potential'),
-    'Airmass': ('Airmass/FZL', 'Airmass/Snow level'),
-    'Turb': ('Turb/MTW', 'Turb/Wind'),
+    'BG': {
+        'layout': 'pair',
+        'left': 'BG/US',
+        'right': 'BG/ICON',
+    },
+    'TS': {
+        'layout': 'quad',
+        'topLeft': 'TS/Flash density',
+        'topRight': 'TS/Flash density ICON',
+        'bottomLeft': 'TS/Severe storm potential',
+        'bottomRight': 'TS/Severe storm potential ICON',
+    },
+    'Airmass': {
+        'layout': 'quad',
+        'topLeft': 'Airmass/FZL',
+        'topRight': 'Airmass/FZL ICON',
+        'bottomLeft': 'Airmass/Snow level',
+        'bottomRight': 'Airmass/Snow level ICON',
+    },
+    'Turb': {
+        'layout': 'quad',
+        'topLeft': 'Turb/MTW',
+        'topRight': 'Turb/MTW ICON',
+        'bottomLeft': 'Turb/Wind',
+        'bottomRight': 'Turb/Wind ICON',
+    },
 }
 
 LEGEND_CONFIG = {
@@ -432,10 +457,8 @@ def calibrate_domain_georef():
         crs=ccrs.PlateCarree(),
     )
     ax.add_feature(cfeature.COASTLINE, linewidth=0.8)
-    ax.set_title(
-        'GFS Freezing Level\n'
-        'Run: 2026-01-01 0000Z | Valid: 2026-01-01 0900Z'
-    )
+    # Titles live in the viewer table chrome (model columns / product rows).
+    ax.set_title('')
     axes_fraction = measure_axes_image_fraction(fig, ax)
     plt.close(fig)
 
@@ -778,14 +801,50 @@ def pair_published_frames(left_frames, right_frames):
     ]
 
 
+def quad_published_frames(top_left_frames, top_right_frames, bottom_left_frames, bottom_right_frames):
+    """Build 2x2 frame entries keyed by GFS (left-column) hours.
+
+    ICON (right-column) paths are attached when present for that hour so the
+    UI can show a quad layout before ICON products exist for every step.
+    """
+    top_left_by_hour = {frame['hour']: frame['path'] for frame in top_left_frames}
+    top_right_by_hour = {frame['hour']: frame['path'] for frame in top_right_frames}
+    bottom_left_by_hour = {frame['hour']: frame['path'] for frame in bottom_left_frames}
+    bottom_right_by_hour = {frame['hour']: frame['path'] for frame in bottom_right_frames}
+
+    hours = sorted(set(top_left_by_hour) & set(bottom_left_by_hour))
+    entries = []
+    for hour in hours:
+        entry = {
+            'hour': hour,
+            'topLeftPath': top_left_by_hour[hour],
+            'bottomLeftPath': bottom_left_by_hour[hour],
+        }
+        if hour in top_right_by_hour:
+            entry['topRightPath'] = top_right_by_hour[hour]
+        if hour in bottom_right_by_hour:
+            entry['bottomRightPath'] = bottom_right_by_hour[hour]
+        entries.append(entry)
+    return entries
+
+
 def build_categories_manifest(root_relative_dir, base_dir):
     categories = {}
 
-    for category, (left_subdir, right_subdir) in CATEGORY_PANEL_DIRS.items():
-        categories[category] = pair_published_frames(
-            list_published_frames(os.path.join(root_relative_dir, left_subdir), base_dir),
-            list_published_frames(os.path.join(root_relative_dir, right_subdir), base_dir),
-        )
+    for category, panel_dirs in CATEGORY_PANEL_DIRS.items():
+        layout = panel_dirs.get('layout', 'pair')
+        if layout == 'quad':
+            categories[category] = quad_published_frames(
+                list_published_frames(os.path.join(root_relative_dir, panel_dirs['topLeft']), base_dir),
+                list_published_frames(os.path.join(root_relative_dir, panel_dirs['topRight']), base_dir),
+                list_published_frames(os.path.join(root_relative_dir, panel_dirs['bottomLeft']), base_dir),
+                list_published_frames(os.path.join(root_relative_dir, panel_dirs['bottomRight']), base_dir),
+            )
+        else:
+            categories[category] = pair_published_frames(
+                list_published_frames(os.path.join(root_relative_dir, panel_dirs['left']), base_dir),
+                list_published_frames(os.path.join(root_relative_dir, panel_dirs['right']), base_dir),
+            )
 
     return categories
 
@@ -924,18 +983,6 @@ def mixing_ratio_from_dewpoint_and_pressure(td_c, pressure_hpa):
     vapor_pressure_hpa = np.minimum(vapor_pressure_hpa, pressure_hpa - 0.01)
     epsilon = 0.622
     return (epsilon * vapor_pressure_hpa) / (pressure_hpa - vapor_pressure_hpa)
-
-
-def calculate_total_totals(data):
-    """Return the Total Totals index in degrees Celsius."""
-    temp_850 = get_isobaric_field(data['Temperature_isobaric'], 85000)
-    temp_500 = get_isobaric_field(data['Temperature_isobaric'], 50000)
-    rh_850 = get_isobaric_field(data['Relative_humidity_isobaric'], 85000)
-
-    td_850_c = dewpoint_from_temperature_and_rh(temp_850.values, rh_850.values)
-    t_850_c = temp_850.values - 273.15
-    t_500_c = temp_500.values - 273.15
-    return t_850_c + td_850_c - 2.0 * t_500_c
 
 
 def _interp_level_to_pressure(field_3d, p_env_pa, target_p_pa):
@@ -1187,6 +1234,93 @@ def calculate_min_lifted_index_minus20(data):
     return min_li20
 
 
+def calculate_thermal_mixed_layer_depth_ft(data, min_surface_temp_c=30.0, theta_excess_k=0.5):
+    """Diagnose daytime thermal depth (ft AGL) for GFS and ICON.
+
+    Visible thermals require:
+      1. 2 m temperature above *min_surface_temp_c*
+      2. A near-surface superadiabatic (θ decreasing with height)
+    Depth is the height AGL where environmental θ first exceeds θ_2m + theta_excess_k.
+    Returns NaN where the gates fail (including depths that should stay transparent).
+    """
+    if 'Temperature_isobaric' not in data or 'Geopotential_height_isobaric' not in data:
+        print('Warning: Temperature/height isobaric fields missing; thermals layer skipped.')
+        return None
+
+    temp_2m_k = get_time_index(data['Temperature_height_above_ground'].sel(height_above_ground3=2)).values
+    temp_2m_c = temp_2m_k - 273.15
+    terrain_m = get_time_index(data['Geopotential_height_surface']).values
+
+    temp_isobaric = get_time_index(data['Temperature_isobaric'])
+    hgt_isobaric = get_time_index(data['Geopotential_height_isobaric'])
+    pressures_pa = np.asarray(temp_isobaric['isobaric'].values, dtype=float)
+    sort_idx = np.argsort(pressures_pa)[::-1]  # surface-near first
+
+    temp_iso_k = temp_isobaric.values[sort_idx, :, :]
+    hgt_iso_m = hgt_isobaric.values[sort_idx, :, :]
+    p_iso_pa = pressures_pa[sort_idx]
+
+    # Potential temperature at 2 m. Prefer true surface pressure; otherwise
+    # reduce MSLP to terrain with a hypsometric estimate. A fixed 1013.25 hPa
+    # fallback underestimates θ₂ₘ inland and kills the superadiabatic gate.
+    if 'Pressure_surface' in data:
+        p_sfc_pa = get_time_index(data['Pressure_surface']).values.astype(float)
+    elif 'MSLP_Eta_model_reduction_msl' in data:
+        mslp_pa = get_time_index(data['MSLP_Eta_model_reduction_msl']).values.astype(float)
+        p_sfc_pa = mslp_pa * np.exp(-9.80665 * terrain_m / (287.05 * np.maximum(temp_2m_k, 1.0)))
+    else:
+        p_sfc_pa = np.full(temp_2m_k.shape, 101325.0, dtype=float)
+    p_sfc_pa = np.maximum(p_sfc_pa, 1.0)
+    theta_2m = temp_2m_k * np.power(100000.0 / p_sfc_pa, _kappa)
+
+    # First isobaric level clearly above terrain (>= 50 m AGL).
+    height_agl_m = hgt_iso_m - terrain_m[np.newaxis, :, :]
+    above_terrain = height_agl_m >= 50.0
+    first_level_idx = np.argmax(above_terrain, axis=0)
+    has_first_level = np.any(above_terrain, axis=0)
+
+    nlev, nlat, nlon = temp_iso_k.shape
+    row_idx = np.arange(nlat)[:, np.newaxis]
+    col_idx = np.arange(nlon)[np.newaxis, :]
+    t_first_k = temp_iso_k[first_level_idx, row_idx, col_idx]
+    p_first_pa = p_iso_pa[first_level_idx]
+    theta_first = t_first_k * np.power(100000.0 / np.maximum(p_first_pa, 1.0), _kappa)
+
+    hot = temp_2m_c > min_surface_temp_c
+    superadiabatic = has_first_level & (theta_2m > theta_first)
+    candidate = hot & superadiabatic
+
+    theta_iso = temp_iso_k * np.power(100000.0 / np.maximum(p_iso_pa[:, np.newaxis, np.newaxis], 1.0), _kappa)
+    theta_threshold = theta_2m + theta_excess_k
+
+    # Mixed-layer top: first level (above the near-surface sample) where θ exceeds threshold.
+    above_threshold = theta_iso > theta_threshold[np.newaxis, :, :]
+    # Ignore levels at/below the first-above-terrain index for the depth search.
+    level_indices = np.arange(nlev)[:, np.newaxis, np.newaxis]
+    above_threshold = above_threshold & (level_indices > first_level_idx[np.newaxis, :, :]) & above_terrain
+
+    top_idx = np.argmax(above_threshold, axis=0)
+    has_top = np.any(above_threshold, axis=0)
+    # If never capped within the profile, use the highest above-terrain level.
+    level_ids = np.arange(nlev)[:, np.newaxis, np.newaxis]
+    fallback_idx = np.max(np.where(above_terrain, level_ids, -1), axis=0)
+
+    depth_idx = np.where(has_top, top_idx, fallback_idx)
+    depth_m = hgt_iso_m[depth_idx, row_idx, col_idx] - terrain_m
+    depth_ft = depth_m * 3.28084
+
+    result = np.where(
+        candidate & (depth_idx >= 0) & np.isfinite(depth_ft) & (depth_ft > 0),
+        depth_ft,
+        np.nan,
+    )
+    print(
+        f'Thermals candidates (T>30C + superadiab): {np.sum(candidate)}, '
+        f'finite depth: {np.sum(np.isfinite(result))}'
+    )
+    return result
+
+
 def calculate_freezing_level_height_ft(data):
     """Return freezing level height (ft AMSL), interpolated from available levels."""
     temp_isobaric = get_time_index(data['Temperature_isobaric']) - 273.15
@@ -1368,11 +1502,32 @@ def calculate_estimated_snow_level_m(data):
 
 def get_max_geometric_vertical_velocity(data, pressure_levels_pa):
     """Return the maximum geometric vertical velocity (m/s) across the requested levels."""
-    level_values = [
-        get_isobaric_field(data['Geometric_vertical_velocity_isobaric'], level).values
-        for level in pressure_levels_pa
-    ]
-    return np.max(np.stack(level_values, axis=0), axis=0)
+    if 'Geometric_vertical_velocity_isobaric' not in data:
+        print('Warning: Geometric vertical velocity missing; treating max wz as 0.')
+        sample = get_time_index(data['Geopotential_height_surface']).values
+        return np.zeros_like(sample, dtype=float)
+
+    wz = get_time_index(data['Geometric_vertical_velocity_isobaric'])
+    if 'isobaric' not in wz.dims:
+        return np.nanmax(np.abs(np.asarray(wz.values)), axis=0)
+
+    available = np.asarray(wz['isobaric'].values, dtype=float)
+    level_values = []
+    for level in pressure_levels_pa:
+        # Skip requested levels that were never populated (e.g. ICON flash only
+        # fills the 500 hPa proxy slot).
+        if not np.any(np.isclose(available, float(level))):
+            continue
+        values = get_isobaric_field(data['Geometric_vertical_velocity_isobaric'], level).values
+        if np.all(~np.isfinite(values)):
+            continue
+        level_values.append(values)
+
+    if not level_values:
+        sample = get_time_index(data['Geopotential_height_surface']).values
+        return np.zeros_like(sample, dtype=float)
+
+    return np.nanmax(np.stack(level_values, axis=0), axis=0)
 
 
 def calculate_max_wind_below_850hpa_kt(data):
@@ -1508,20 +1663,32 @@ def calculate_lee_turbulence_category(data):
 
 
 def calculate_mountain_wave_intensity(data, min_pressure_pa=25000):
-    """Return the maximum magnitude of geometric vertical velocity (m/s) from available levels down to 250 hPa."""
+    """Return the maximum magnitude of geometric vertical velocity (m/s).
+
+    GFS provides isobaric ``wz`` filtered to pressures >= *min_pressure_pa*.
+    ICON provides subsampled model-level ``W`` on an ``mtw_level`` dimension;
+    those levels are already chosen in the troposphere so all are used.
+    """
     if 'Geometric_vertical_velocity_isobaric' not in data:
         print('Warning: Geometric vertical velocity field not available; MTW layer skipped.')
         return None
 
-    wz_isobaric = get_time_index(data['Geometric_vertical_velocity_isobaric'])
-    pressures = wz_isobaric['isobaric'].values
-    valid_mask = pressures >= min_pressure_pa
-
-    if not np.any(valid_mask):
-        print('Warning: No isobaric vertical velocity levels available down to 250 hPa; MTW layer skipped.')
+    wz = get_time_index(data['Geometric_vertical_velocity_isobaric'])
+    values = np.asarray(wz.values)
+    if values.ndim != 3:
+        print('Warning: Unexpected vertical velocity shape; MTW layer skipped.')
         return None
 
-    max_abs_wz = np.nanmax(np.abs(wz_isobaric.values[valid_mask, :, :]), axis=0)
+    if 'isobaric' in wz.dims:
+        pressures = np.asarray(wz['isobaric'].values)
+        valid_mask = pressures >= min_pressure_pa
+        if not np.any(valid_mask):
+            print('Warning: No isobaric vertical velocity levels available down to 250 hPa; MTW layer skipped.')
+            return None
+        max_abs_wz = np.nanmax(np.abs(values[valid_mask, :, :]), axis=0)
+    else:
+        max_abs_wz = np.nanmax(np.abs(values), axis=0)
+
     print(f'MTW intensity grid points >= 0.2 m/s: {np.sum(max_abs_wz >= 0.2)}')
     return max_abs_wz
 
@@ -1737,7 +1904,6 @@ def get_gfs_data(forecast_hour=9, latest_dataset=None, init_time=None, include_t
 
     if include_airmass_fields:
         params.update({
-            'var_HPBL': 'on',
             'var_ACPCP': 'on',
             'lev_700_mb': 'on',
         })
@@ -1830,7 +1996,10 @@ def get_gfs_data(forecast_hour=9, latest_dataset=None, init_time=None, include_t
 
         if 'cape' in ds_surface.data_vars:
             dataset_vars['Convective_available_potential_energy_surface'] = ds_surface['cape']
-        if 'pres' in ds_surface.data_vars:
+        # cfgrib names surface pressure `sp` (CF); older paths may use `pres`.
+        if 'sp' in ds_surface.data_vars:
+            dataset_vars['Pressure_surface'] = ds_surface['sp']
+        elif 'pres' in ds_surface.data_vars:
             dataset_vars['Pressure_surface'] = ds_surface['pres']
 
         if 'u' in ds_isobaric.data_vars:
@@ -1840,22 +2009,6 @@ def get_gfs_data(forecast_hour=9, latest_dataset=None, init_time=None, include_t
 
         if 'wz' in ds_isobaric.data_vars:
             dataset_vars['Geometric_vertical_velocity_isobaric'] = ds_isobaric['wz']
-
-        if include_airmass_fields:
-            # NCEP HPBL decodes as 'unknown' in cfgrib (no standard name mapping).
-            # Scan all sub-datasets from the same GRIB2 file to find it.
-            all_surface_ds = cfgrib.open_datasets(
-                temp_grib_path,
-                backend_kwargs={
-                    'filter_by_keys': {'typeOfLevel': 'surface', 'stepType': 'instant'},
-                    'indexpath': '',
-                },
-            )
-            for _ds in all_surface_ds:
-                if 'unknown' in _ds.data_vars:
-                    _ds = _ds.load()
-                    dataset_vars['Planetary_boundary_layer_height_surface'] = _ds['unknown']
-                    break
 
         if include_ts_fields:
             if forecast_hour == 0:
@@ -1949,7 +2102,7 @@ def evict_stale_icon_cache(current_run_stamp):
         print(f'Evicted {removed} stale ICON cache entries ({freed_bytes / 1024 / 1024:.1f} MB freed)')
 
 
-def _download_icon_grib2(icon_run, folder, filename):
+def _download_icon_grib2(icon_run, folder, filename, max_attempts=5):
     """Download and bz2-decompress one ICON GRIB2 file, using a local cache."""
     cache_path = os.path.join(ICON_CACHE_DIR, f"{icon_run['run_stamp']}_{folder}_{filename}")
     if os.path.exists(cache_path):
@@ -1957,15 +2110,22 @@ def _download_icon_grib2(icon_run, folder, filename):
             return fh.read()
 
     url = f"{icon_run['base_url']}/{icon_run['cycle']}/{folder}/{filename}"
-    response = requests.get(url, timeout=240)
-    response.raise_for_status()
-    raw = bz2.decompress(response.content)
-
-    os.makedirs(ICON_CACHE_DIR, exist_ok=True)
-    with open(cache_path, 'wb') as fh:
-        fh.write(raw)
-
-    return raw
+    last_error = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            response = requests.get(url, timeout=240)
+            response.raise_for_status()
+            raw = bz2.decompress(response.content)
+            os.makedirs(ICON_CACHE_DIR, exist_ok=True)
+            with open(cache_path, 'wb') as fh:
+                fh.write(raw)
+            return raw
+        except (requests.RequestException, OSError, EOFError) as exc:
+            last_error = exc
+            if attempt >= max_attempts:
+                break
+            time.sleep(min(2 ** attempt, 20))
+    raise RuntimeError(f'Failed to download ICON field {filename} after {max_attempts} attempts') from last_error
 
 
 def _load_icon_field(icon_run, folder, filename):
@@ -2035,49 +2195,255 @@ def _regrid_icon_to_domain(icon_field_values, remap_state):
     return values[remap_state['nn_indices']].reshape(remap_state['lat_grid'].shape)
 
 
-def get_icon_data(forecast_hour, icon_run, remap_state, prev_tp_values=None):
-    """Fetch and regrid all ICON fields for one forecast hour.
+# ICON open-data pressure levels used per product family.
+# Optional keys:
+#   need_fi / need_rh (default True): fetch FI / RH on fi_levels / rh_levels
+#   fi_levels_hpa / rh_levels_hpa / uv_levels_hpa: override which pressures
+#     get that field (default = pressure_levels_hpa when the need_* flag is set)
+ICON_FIELD_SETS = {
+    'bg': {
+        'pressure_levels_hpa': [1000, 950, 900, 850, 500],
+        'need_t': False,
+        'need_fi': True,
+        'need_rh': True,
+        'need_uv': False,
+        'need_ps': False,
+        'need_cape': False,
+        'need_rain_con': False,
+        'need_mtw_w': False,
+        'need_flash_w': False,
+    },
+    'airmass': {
+        'pressure_levels_hpa': [1000, 950, 925, 900, 850, 800, 700, 600, 500],
+        'need_t': True,
+        'need_fi': True,
+        'need_rh': True,
+        'need_uv': False,
+        'need_ps': True,
+        'need_cape': False,
+        'need_rain_con': True,
+        'need_mtw_w': False,
+        'need_flash_w': False,
+    },
+    'ts_flash': {
+        # LI-20 needs T+RH through ~300 hPa; rain_con + model-level W@92 for gates.
+        # No FI/U/V/Psfc (unused by flash). Dropped 250 (LI-20 upper stack ends at 300).
+        'pressure_levels_hpa': [1000, 950, 925, 900, 850, 800, 700, 600, 500, 400, 300],
+        'need_t': True,
+        'need_fi': False,
+        'need_rh': True,
+        'need_uv': False,
+        'need_ps': False,
+        'need_cape': False,
+        'need_rain_con': True,
+        'need_mtw_w': False,
+        'need_flash_w': True,
+    },
+    'ts_severe': {
+        # SigHail + sfc→500 shear only need T/FI at 700 & 500, U/V at 500, CAPE, Psfc.
+        'pressure_levels_hpa': [700, 500],
+        'need_t': True,
+        'need_fi': True,
+        'fi_levels_hpa': [700, 500],
+        'need_rh': False,
+        'need_uv': True,
+        'uv_levels_hpa': [500],
+        'need_ps': True,
+        'need_cape': True,
+        'need_rain_con': False,
+        'need_mtw_w': False,
+        'need_flash_w': False,
+    },
+    'turb_wind': {
+        'pressure_levels_hpa': [1000, 950, 925, 900, 850, 800, 700],
+        'need_t': False,
+        'need_fi': True,
+        'need_rh': True,
+        'need_uv': True,
+        'need_ps': False,
+        'need_cape': False,
+        'need_rain_con': False,
+        'need_mtw_w': False,
+        'need_flash_w': False,
+    },
+    'turb_mtw': {
+        # Sparse pressure stack only for terrain context; MTW intensity uses model-level W.
+        'pressure_levels_hpa': [1000, 850, 500],
+        'need_t': False,
+        'need_fi': True,
+        'need_rh': True,
+        'need_uv': False,
+        'need_ps': False,
+        'need_cape': False,
+        'need_rain_con': False,
+        'need_mtw_w': True,
+        'need_flash_w': False,
+    },
+    # Lean union of ts_flash + ts_severe for atomic / multi-panel TS builds.
+    'ts_bundle': {
+        'pressure_levels_hpa': [1000, 950, 925, 900, 850, 800, 700, 600, 500, 400, 300],
+        'need_t': True,
+        'need_fi': True,
+        'fi_levels_hpa': [700, 500],
+        'need_rh': True,
+        'need_uv': True,
+        'uv_levels_hpa': [500],
+        'need_ps': True,
+        'need_cape': True,
+        'need_rain_con': True,
+        'need_mtw_w': False,
+        'need_flash_w': True,
+    },
+    'turb_bundle': {
+        'pressure_levels_hpa': [1000, 950, 925, 900, 850, 800, 700, 500],
+        'need_t': False,
+        'need_fi': True,
+        'need_rh': True,
+        'need_uv': True,
+        'need_ps': False,
+        'need_cape': False,
+        'need_rain_con': False,
+        'need_mtw_w': True,
+        'need_flash_w': False,
+    },
+}
 
-    All per-field downloads and GRIB parses are dispatched in parallel via a
-    thread pool.  Pass the raw TOT_PREC numpy array from the previous call as
-    *prev_tp_values* to avoid re-downloading the prior hour's accumulation.
 
-    Returns (ds, init_time, tp_raw_values) where tp_raw_values can be passed
-    as prev_tp_values on the next consecutive forecast hour.
+def _icon_field_level_lists(cfg):
+    """Resolve which pressure levels (hPa) to fetch for each isobaric field."""
+    base = list(cfg['pressure_levels_hpa'])
+    need_t = bool(cfg.get('need_t', False))
+    need_fi = bool(cfg.get('need_fi', True))
+    need_rh = bool(cfg.get('need_rh', True))
+    need_uv = bool(cfg.get('need_uv', False))
+
+    t_levels = list(base) if need_t else []
+    fi_levels = list(cfg['fi_levels_hpa']) if need_fi and 'fi_levels_hpa' in cfg else (list(base) if need_fi else [])
+    rh_levels = list(cfg['rh_levels_hpa']) if need_rh and 'rh_levels_hpa' in cfg else (list(base) if need_rh else [])
+    uv_levels = list(cfg['uv_levels_hpa']) if need_uv and 'uv_levels_hpa' in cfg else (list(base) if need_uv else [])
+
+    union = set(t_levels) | set(fi_levels) | set(rh_levels) | set(uv_levels)
+    if cfg.get('need_flash_w'):
+        union.add(500)  # flash W is mapped onto the 500 hPa isobaric slot
+    return {
+        'need_t': need_t,
+        'need_fi': need_fi,
+        'need_rh': need_rh,
+        'need_uv': need_uv,
+        't_levels': t_levels,
+        'fi_levels': fi_levels,
+        'rh_levels': rh_levels,
+        'uv_levels': uv_levels,
+        'union_levels': sorted(union),
+    }
+
+# Subsampled ICON model levels for mountain-wave max|W| (higher = nearer surface).
+# Trimmed from 10→6: dropped 65/75 (upper trop) and 118/120 (near-surface).
+ICON_MTW_MODEL_LEVELS = (85, 92, 98, 104, 110, 114)
+
+# Single ICON model level used as a ~500 hPa vertical-velocity proxy for TS flash.
+# Calibrated over AU against 500 hPa geopotential height (HHL ~5850 m vs ~5730 m).
+ICON_FLASH_W_MODEL_LEVEL = 92
+
+
+def get_icon_data(
+    forecast_hour,
+    icon_run,
+    remap_state,
+    prev_tp_values=None,
+    prev_rain_con_values=None,
+    field_set='bg',
+):
+    """Fetch and regrid ICON fields for one forecast hour.
+
+    *field_set* selects which optional products to download (see ICON_FIELD_SETS).
+    Returns (ds, init_time, accum_state) where accum_state is
+    ``{'tot_prec': array|None, 'rain_con': array|None}`` for the next hour.
     """
     if forecast_hour < 0 or forecast_hour > 72:
         raise ValueError('ICON hourly generation is configured for forecast hours 0-72')
+    if field_set not in ICON_FIELD_SETS:
+        raise ValueError(f'Unknown ICON field_set: {field_set}')
 
+    cfg = ICON_FIELD_SETS[field_set]
+    levels = _icon_field_level_lists(cfg)
     run_stamp = icon_run['run_stamp']
     fh = f'{forecast_hour:03d}'
-    pressure_levels_hpa = [1000, 950, 900, 850, 500]
 
-    # Build the full list of (task_key, folder, filename) for this hour.
     fetch_tasks = [
-        ('pmsl',    'pmsl',     f'icon_global_icosahedral_single-level_{run_stamp}_{fh}_PMSL.grib2.bz2'),
-        ('u_10m',   'u_10m',    f'icon_global_icosahedral_single-level_{run_stamp}_{fh}_U_10M.grib2.bz2'),
-        ('v_10m',   'v_10m',    f'icon_global_icosahedral_single-level_{run_stamp}_{fh}_V_10M.grib2.bz2'),
-        ('t_2m',    't_2m',     f'icon_global_icosahedral_single-level_{run_stamp}_{fh}_T_2M.grib2.bz2'),
-        ('td_2m',   'td_2m',    f'icon_global_icosahedral_single-level_{run_stamp}_{fh}_TD_2M.grib2.bz2'),
-        ('tot_prec','tot_prec', f'icon_global_icosahedral_single-level_{run_stamp}_{fh}_TOT_PREC.grib2.bz2'),
+        ('pmsl', 'pmsl', f'icon_global_icosahedral_single-level_{run_stamp}_{fh}_PMSL.grib2.bz2'),
+        ('u_10m', 'u_10m', f'icon_global_icosahedral_single-level_{run_stamp}_{fh}_U_10M.grib2.bz2'),
+        ('v_10m', 'v_10m', f'icon_global_icosahedral_single-level_{run_stamp}_{fh}_V_10M.grib2.bz2'),
+        ('t_2m', 't_2m', f'icon_global_icosahedral_single-level_{run_stamp}_{fh}_T_2M.grib2.bz2'),
+        ('td_2m', 'td_2m', f'icon_global_icosahedral_single-level_{run_stamp}_{fh}_TD_2M.grib2.bz2'),
+        ('tot_prec', 'tot_prec', f'icon_global_icosahedral_single-level_{run_stamp}_{fh}_TOT_PREC.grib2.bz2'),
     ]
-    for level_hpa in pressure_levels_hpa:
+    if cfg['need_ps']:
+        fetch_tasks.append(
+            ('ps', 'ps', f'icon_global_icosahedral_single-level_{run_stamp}_{fh}_PS.grib2.bz2')
+        )
+    if cfg['need_cape']:
+        fetch_tasks.append(
+            ('cape_ml', 'cape_ml', f'icon_global_icosahedral_single-level_{run_stamp}_{fh}_CAPE_ML.grib2.bz2')
+        )
+    if cfg['need_rain_con']:
+        fetch_tasks.append(
+            ('rain_con', 'rain_con', f'icon_global_icosahedral_single-level_{run_stamp}_{fh}_RAIN_CON.grib2.bz2')
+        )
+
+    for level_hpa in levels['fi_levels']:
         fetch_tasks.append((
             f'fi_{level_hpa}', 'fi',
             f'icon_global_icosahedral_pressure-level_{run_stamp}_{fh}_{level_hpa}_FI.grib2.bz2',
         ))
+    for level_hpa in levels['rh_levels']:
         fetch_tasks.append((
             f'rh_{level_hpa}', 'relhum',
             f'icon_global_icosahedral_pressure-level_{run_stamp}_{fh}_{level_hpa}_RELHUM.grib2.bz2',
         ))
+    for level_hpa in levels['t_levels']:
+        fetch_tasks.append((
+            f't_{level_hpa}', 't',
+            f'icon_global_icosahedral_pressure-level_{run_stamp}_{fh}_{level_hpa}_T.grib2.bz2',
+        ))
+    for level_hpa in levels['uv_levels']:
+        fetch_tasks.append((
+            f'u_{level_hpa}', 'u',
+            f'icon_global_icosahedral_pressure-level_{run_stamp}_{fh}_{level_hpa}_U.grib2.bz2',
+        ))
+        fetch_tasks.append((
+            f'v_{level_hpa}', 'v',
+            f'icon_global_icosahedral_pressure-level_{run_stamp}_{fh}_{level_hpa}_V.grib2.bz2',
+        ))
 
-    # Also fetch previous-hour TOT_PREC when it is not already available in memory.
+    if cfg['need_mtw_w']:
+        for level in ICON_MTW_MODEL_LEVELS:
+            fetch_tasks.append((
+                f'w_{level}', 'w',
+                f'icon_global_icosahedral_model-level_{run_stamp}_{fh}_{level}_W.grib2.bz2',
+            ))
+
+    if cfg['need_flash_w']:
+        flash_level = ICON_FLASH_W_MODEL_LEVEL
+        fetch_tasks.append((
+            f'w_flash_{flash_level}', 'w',
+            f'icon_global_icosahedral_model-level_{run_stamp}_{fh}_{flash_level}_W.grib2.bz2',
+        ))
+
     need_prev_tp = forecast_hour > 0 and prev_tp_values is None
     if need_prev_tp:
         prev_fh = f'{forecast_hour - 1:03d}'
         fetch_tasks.append((
             'tot_prec_prev', 'tot_prec',
             f'icon_global_icosahedral_single-level_{run_stamp}_{prev_fh}_TOT_PREC.grib2.bz2',
+        ))
+
+    need_prev_rain = cfg['need_rain_con'] and forecast_hour > 0 and prev_rain_con_values is None
+    if need_prev_rain:
+        prev_fh = f'{forecast_hour - 1:03d}'
+        fetch_tasks.append((
+            'rain_con_prev', 'rain_con',
+            f'icon_global_icosahedral_single-level_{run_stamp}_{prev_fh}_RAIN_CON.grib2.bz2',
         ))
 
     def _fetch(task):
@@ -2088,17 +2454,7 @@ def get_icon_data(forecast_hour, icon_run, remap_state, prev_tp_values=None):
     with ThreadPoolExecutor(max_workers=min(len(fetch_tasks), 8)) as pool:
         fetched = dict(pool.map(_fetch, fetch_tasks))
 
-    pmsl_da  = fetched['pmsl']
-    u10_da   = fetched['u_10m']
-    v10_da   = fetched['v_10m']
-    t2m_da   = fetched['t_2m']
-    td2m_da  = fetched['td_2m']
-    tp_da    = fetched['tot_prec']
-
-    fi_levels = {level: fetched[f'fi_{level}']  for level in pressure_levels_hpa}
-    rh_levels = {level: fetched[f'rh_{level}']  for level in pressure_levels_hpa}
-
-    # Convert ICON accumulated precipitation to an hourly rate (mm/s).
+    tp_da = fetched['tot_prec']
     if forecast_hour == 0:
         tp_rate_raw = np.zeros_like(tp_da.values)
     elif prev_tp_values is not None:
@@ -2106,61 +2462,159 @@ def get_icon_data(forecast_hour, icon_run, remap_state, prev_tp_values=None):
     else:
         tp_rate_raw = np.maximum(tp_da.values - fetched['tot_prec_prev'].values, 0.0) / 3600.0
 
-    pmsl_grid = _regrid_icon_to_domain(pmsl_da.values, remap_state)
-    u10_grid = _regrid_icon_to_domain(u10_da.values, remap_state)
-    v10_grid = _regrid_icon_to_domain(v10_da.values, remap_state)
-    t2m_grid = _regrid_icon_to_domain(t2m_da.values, remap_state)
-    td2m_grid = _regrid_icon_to_domain(td2m_da.values, remap_state)
+    rain_con_raw = None
+    rain_con_1h = None
+    if cfg['need_rain_con']:
+        rain_con_da = fetched['rain_con']
+        rain_con_raw = rain_con_da.values
+        if forecast_hour == 0:
+            rain_con_1h = np.zeros_like(rain_con_raw)
+        elif prev_rain_con_values is not None:
+            rain_con_1h = np.maximum(rain_con_raw - prev_rain_con_values, 0.0)
+        else:
+            rain_con_1h = np.maximum(rain_con_raw - fetched['rain_con_prev'].values, 0.0)
+
+    pmsl_grid = _regrid_icon_to_domain(fetched['pmsl'].values, remap_state)
+    u10_grid = _regrid_icon_to_domain(fetched['u_10m'].values, remap_state)
+    v10_grid = _regrid_icon_to_domain(fetched['v_10m'].values, remap_state)
+    t2m_grid = _regrid_icon_to_domain(fetched['t_2m'].values, remap_state)
+    td2m_grid = _regrid_icon_to_domain(fetched['td_2m'].values, remap_state)
     tp_rate_grid = _regrid_icon_to_domain(tp_rate_raw, remap_state)
 
-    fi_grids = {
-        int(level * 100): _regrid_icon_to_domain(fi_levels[level].values / 9.80665, remap_state)
-        for level in pressure_levels_hpa
-    }
-    rh_grids = {
-        int(level * 100): _regrid_icon_to_domain(rh_levels[level].values, remap_state)
-        for level in pressure_levels_hpa
+    isobaric_levels_pa = np.array([int(level * 100) for level in levels['union_levels']], dtype=np.int32)
+    nlat, nlon = pmsl_grid.shape
+
+    def _stack_isobaric(prefix, level_hpa_list, transform=None):
+        """Stack sparse level grids onto the shared isobaric axis (NaN where missing)."""
+        out = np.full((len(isobaric_levels_pa), nlat, nlon), np.nan, dtype=np.float64)
+        level_to_idx = {int(p): i for i, p in enumerate(isobaric_levels_pa)}
+        for level_hpa in level_hpa_list:
+            values = fetched[f'{prefix}_{level_hpa}'].values
+            if transform is not None:
+                values = transform(values)
+            out[level_to_idx[int(level_hpa * 100)]] = _regrid_icon_to_domain(values, remap_state)
+        return out
+
+    dataset_vars = {
+        'MSLP_Eta_model_reduction_msl': (('latitude', 'longitude'), pmsl_grid),
+        'Geopotential_height_surface': (('latitude', 'longitude'), remap_state['hsurf_grid']),
+        'Precipitation_rate_surface': (('latitude', 'longitude'), tp_rate_grid),
+        'u-component_of_wind_height_above_ground': (
+            ('height_above_ground2', 'latitude', 'longitude'),
+            u10_grid[np.newaxis, :, :],
+        ),
+        'v-component_of_wind_height_above_ground': (
+            ('height_above_ground2', 'latitude', 'longitude'),
+            v10_grid[np.newaxis, :, :],
+        ),
+        'Temperature_height_above_ground': (
+            ('height_above_ground3', 'latitude', 'longitude'),
+            t2m_grid[np.newaxis, :, :],
+        ),
+        'Dewpoint_temperature_height_above_ground': (
+            ('height_above_ground4', 'latitude', 'longitude'),
+            td2m_grid[np.newaxis, :, :],
+        ),
     }
 
-    isobaric_levels_pa = np.array(sorted(fi_grids.keys()), dtype=np.int32)
-    geopotential_height = np.stack([fi_grids[level] for level in isobaric_levels_pa], axis=0)
-    rel_humidity = np.stack([rh_grids[level] for level in isobaric_levels_pa], axis=0)
-
-    ds = xr.Dataset(
-        {
-            'MSLP_Eta_model_reduction_msl': (('latitude', 'longitude'), pmsl_grid),
-            'Geopotential_height_isobaric': (('isobaric', 'latitude', 'longitude'), geopotential_height),
-            'Geopotential_height_surface': (('latitude', 'longitude'), remap_state['hsurf_grid']),
-            'Precipitation_rate_surface': (('latitude', 'longitude'), tp_rate_grid),
-            'u-component_of_wind_height_above_ground': (
-                ('height_above_ground2', 'latitude', 'longitude'),
-                u10_grid[np.newaxis, :, :],
-            ),
-            'v-component_of_wind_height_above_ground': (
-                ('height_above_ground2', 'latitude', 'longitude'),
-                v10_grid[np.newaxis, :, :],
-            ),
-            'Relative_humidity_isobaric': (('isobaric', 'latitude', 'longitude'), rel_humidity),
-            'Temperature_height_above_ground': (
-                ('height_above_ground3', 'latitude', 'longitude'),
-                t2m_grid[np.newaxis, :, :],
-            ),
-            'Dewpoint_temperature_height_above_ground': (
-                ('height_above_ground4', 'latitude', 'longitude'),
-                td2m_grid[np.newaxis, :, :],
-            ),
-        },
-        coords={
-            'longitude': remap_state['lons'],
-            'latitude': remap_state['lats'],
-            'isobaric': isobaric_levels_pa,
-            'height_above_ground2': [10],
-            'height_above_ground3': [2],
-            'height_above_ground4': [2],
-        },
+    # Always expose isobaric height/RH slots (NaN-filled where not fetched) so
+    # shared plot helpers can key off the isobaric coordinate safely.
+    dataset_vars['Geopotential_height_isobaric'] = (
+        ('isobaric', 'latitude', 'longitude'),
+        _stack_isobaric('fi', levels['fi_levels'], transform=lambda v: v / 9.80665)
+        if levels['fi_levels']
+        else np.full((len(isobaric_levels_pa), nlat, nlon), np.nan, dtype=np.float64),
+    )
+    dataset_vars['Relative_humidity_isobaric'] = (
+        ('isobaric', 'latitude', 'longitude'),
+        _stack_isobaric('rh', levels['rh_levels'])
+        if levels['rh_levels']
+        else np.full((len(isobaric_levels_pa), nlat, nlon), np.nan, dtype=np.float64),
     )
 
-    return ds, icon_run['init_time'], tp_da.values
+    if levels['need_t']:
+        dataset_vars['Temperature_isobaric'] = (
+            ('isobaric', 'latitude', 'longitude'),
+            _stack_isobaric('t', levels['t_levels']),
+        )
+
+    if levels['need_uv']:
+        dataset_vars['u-component_of_wind_isobaric'] = (
+            ('isobaric', 'latitude', 'longitude'),
+            _stack_isobaric('u', levels['uv_levels']),
+        )
+        dataset_vars['v-component_of_wind_isobaric'] = (
+            ('isobaric', 'latitude', 'longitude'),
+            _stack_isobaric('v', levels['uv_levels']),
+        )
+
+    if cfg['need_ps']:
+        ps_grid = _regrid_icon_to_domain(fetched['ps'].values, remap_state)
+        dataset_vars['Pressure_surface'] = (('latitude', 'longitude'), ps_grid)
+
+    if cfg['need_cape']:
+        cape_grid = _regrid_icon_to_domain(fetched['cape_ml'].values, remap_state)
+        dataset_vars['Convective_available_potential_energy_surface'] = (
+            ('latitude', 'longitude'),
+            cape_grid,
+        )
+
+    if rain_con_1h is not None:
+        rain_con_grid = _regrid_icon_to_domain(rain_con_1h, remap_state)
+        dataset_vars['Convective_precipitation_1h_surface'] = (
+            ('latitude', 'longitude'),
+            rain_con_grid,
+        )
+
+    coords = {
+        'longitude': remap_state['lons'],
+        'latitude': remap_state['lats'],
+        'isobaric': isobaric_levels_pa,
+        'height_above_ground2': [10],
+        'height_above_ground3': [2],
+        'height_above_ground4': [2],
+    }
+
+    if cfg['need_mtw_w']:
+        w_arr = np.stack(
+            [
+                _regrid_icon_to_domain(fetched[f'w_{level}'].values, remap_state)
+                for level in ICON_MTW_MODEL_LEVELS
+            ],
+            axis=0,
+        )
+        coords['mtw_level'] = np.array(ICON_MTW_MODEL_LEVELS, dtype=np.int32)
+        dataset_vars['Geometric_vertical_velocity_isobaric'] = (
+            ('mtw_level', 'latitude', 'longitude'),
+            w_arr,
+        )
+    elif cfg['need_flash_w']:
+        # Map model-level W (~500 hPa over AU) onto the existing isobaric axis so
+        # the shared GFS-style flash gate can read 50000 Pa without clobbering T/RH.
+        flash_level = ICON_FLASH_W_MODEL_LEVEL
+        w_flash = _regrid_icon_to_domain(fetched[f'w_flash_{flash_level}'].values, remap_state)
+        w_stack = np.full(
+            (len(isobaric_levels_pa), w_flash.shape[0], w_flash.shape[1]),
+            np.nan,
+            dtype=np.float64,
+        )
+        try:
+            flash_idx = list(isobaric_levels_pa).index(50000)
+        except ValueError:
+            flash_idx = int(np.argmin(np.abs(np.asarray(isobaric_levels_pa) - 50000)))
+        w_stack[flash_idx] = w_flash
+        dataset_vars['Geometric_vertical_velocity_isobaric'] = (
+            ('isobaric', 'latitude', 'longitude'),
+            w_stack,
+        )
+
+    ds = xr.Dataset(dataset_vars, coords=coords)
+
+    accum_state = {
+        'tot_prec': tp_da.values,
+        'rain_con': rain_con_raw,
+    }
+    return ds, icon_run['init_time'], accum_state
 
 # Function to plot the map
 def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg', domain_id='AU'):
@@ -2650,12 +3104,9 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             zorder=5.9,
         )
 
-        # Thermals layer: PBL height (ft) masked where 2m temp <= 30C, with XML palette.
-        if 'Planetary_boundary_layer_height_surface' in data:
-            temp_2m_raw = get_time_index(data['Temperature_height_above_ground'].sel(height_above_ground3=2)) - 273.15
-            pblh_ft = get_time_index(data['Planetary_boundary_layer_height_surface']) * 3.28084
-            thermals_ft = np.where(temp_2m_raw.values > 30.0, pblh_ft.values, np.nan)
-
+        # Thermals: T2m > 30C + near-surface superadiabat, colored by mixed-layer depth.
+        thermals_ft = calculate_thermal_mixed_layer_depth_ft(data)
+        if thermals_ft is not None:
             thermal_levels = [0, 6000, 10000, 20000]
             thermal_colors = [
                 (1.0, 1.0, 1.0, 0.0),
@@ -2677,8 +3128,6 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
                 transform=ccrs.PlateCarree(),
                 zorder=6,
             )
-        else:
-            print('Warning: HPBL field not available in dataset; thermals layer skipped.')
 
         # Cold pool hail layer: 1hr convective precip where 700hPa temp < -9°C
         if 'Convective_precipitation_1h_surface' in data:
@@ -3049,11 +3498,14 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
             transform=ccrs.PlateCarree(),
             zorder=7)
 
-        total_totals = calculate_total_totals(data)
         max_wz = get_max_geometric_vertical_velocity(data, [60000, 50000, 40000, 30000, 25000])
         convective_precip = data['Convective_precipitation_1h_surface']
         min_li20 = calculate_min_lifted_index_minus20(data)
-        ts_mask = (min_li20 < 0.0) & (max_wz > 0.1)
+        # ICON flash has no isobaric wz; keep LI-20 gate and treat missing wz as open.
+        if 'Geometric_vertical_velocity_isobaric' in data and 'isobaric' in data['Geometric_vertical_velocity_isobaric'].dims:
+            ts_mask = (min_li20 < 0.0) & (max_wz > 0.1)
+        else:
+            ts_mask = min_li20 < 0.0
 
         print(f'Min LI-20 < 0 grid points: {np.sum(min_li20 < 0.0)}')
         print(f'Max geometric vertical velocity > 0.1 m/s grid points: {np.sum(max_wz > 0.1)}')
@@ -3257,27 +3709,10 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         zorder=300,
     )
     
-    title_prefix_map = {
-        ('GFS', 'bg'): 'GFS Fog & Low Cloud',
-        ('ICON', 'bg'): 'ICON Fog & Low Cloud',
-        ('GFS', 'ts_flash'): 'GFS Thunderstorms',
-        ('GFS', 'ts_severe'): 'GFS Storm Dynamics',
-        ('GFS', 'airmass_fzl'): 'GFS Freezing Level',
-        ('GFS', 'airmass_snow'): 'GFS Snow Level',
-        ('GFS', 'turb_mtw'): 'GFS Mountain Waves',
-        ('GFS', 'turb_wind'): 'GFS Low Level Turbulence',
-    }
+    # Product / model / run / valid labels are shown in the viewer table chrome
+    # so the rendered map can use the full figure for geography.
+    ax.set_title('')
 
-    title_prefix = title_prefix_map.get((model_name, layer_profile), f'{model_name} Forecast')
-
-    # Add title
-    title = (
-        f'{title_prefix}\n'
-        f'Run: {init_time.strftime("%Y-%m-%d %H%MZ")} | Valid: '
-        f'{valid_time.strftime("%Y-%m-%d %H%MZ")}'
-    )
-    ax.set_title(title)
-    
     return fig
 
 def generate_gfs_bg_frames(
@@ -3370,7 +3805,7 @@ def generate_gfs_ts_flash_frames(
                 prev_acpcp_values=(prev_acpcp_values if use_prev else None),
             )
             last_generated_hour = forecast_hour
-            print('Using raw hourly GFS convective precipitation, Total Totals, and geometric vertical velocity fields')
+            print('Using raw hourly GFS convective precipitation and geometric vertical velocity fields')
 
             filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.{OUTPUT_IMAGE_EXT}'
             for domain_id in domain_ids:
@@ -3427,7 +3862,7 @@ def generate_gfs_ts_severe_frames(
                 prev_acpcp_values=(prev_acpcp_values if use_prev else None),
             )
             last_generated_hour = forecast_hour
-            print('Using raw hourly GFS convective precipitation, Total Totals, and geometric vertical velocity fields')
+            print('Using raw hourly GFS convective precipitation and geometric vertical velocity fields')
 
             filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.{OUTPUT_IMAGE_EXT}'
             for domain_id in domain_ids:
@@ -3760,18 +4195,23 @@ def generate_icon_bg_frames(
             os.makedirs(temp_dir, exist_ok=True)
             temp_dirs[domain_id] = temp_dir
 
-        prev_tp_values = None
+        accum_state = {'tot_prec': None, 'rain_con': None}
         last_generated_hour = None
         for forecast_hour in forecast_hours:
             print(f'\nGenerating ICON frame +{forecast_hour}hrs...')
 
             # Pass the in-memory TOT_PREC from the previous iteration to avoid
             # a redundant network fetch (or cache read) for the prior hour.
-            use_prev = (prev_tp_values is not None
-                        and last_generated_hour == forecast_hour - 1)
-            data, init_time, prev_tp_values = get_icon_data(
-                forecast_hour, icon_run, remap_state,
-                prev_tp_values=(prev_tp_values if use_prev else None),
+            use_prev = (
+                accum_state.get('tot_prec') is not None
+                and last_generated_hour == forecast_hour - 1
+            )
+            data, init_time, accum_state = get_icon_data(
+                forecast_hour,
+                icon_run,
+                remap_state,
+                prev_tp_values=(accum_state.get('tot_prec') if use_prev else None),
+                field_set='bg',
             )
             last_generated_hour = forecast_hour
             print('Using raw hourly ICON model fields')
@@ -3790,6 +4230,290 @@ def generate_icon_bg_frames(
             publish_generated_frames(output_dirs[domain_id], generated_files_by_domain[domain_id], temp_dirs[domain_id])
         if update_manifest:
             write_frame_manifest()
+
+
+def _generate_icon_product_frames(
+    forecast_hours,
+    *,
+    field_set,
+    layer_profile,
+    category,
+    panel_name,
+    preferred_run_time=None,
+    icon_run=None,
+    remap_state=None,
+    update_manifest=True,
+    domain_ids=None,
+    output_dir=None,
+    output_root=None,
+):
+    """Shared ICON generator: fetch once per hour, plot all domains, publish."""
+    domain_ids = normalize_domain_ids(domain_ids)
+    output_dirs = resolve_panel_output_dirs(
+        domain_ids, category, panel_name, output_dir=output_dir, output_root=output_root
+    )
+    for domain_output_dir in output_dirs.values():
+        os.makedirs(domain_output_dir, exist_ok=True)
+
+    if icon_run is None:
+        icon_run = get_latest_icon_run(target_time=preferred_run_time)
+    init_time = icon_run['init_time']
+    evict_stale_icon_cache(icon_run['run_stamp'])
+    if remap_state is None:
+        remap_state = _load_icon_static_remap(icon_run)
+
+    staging_prefix = f'avmaps_icon_{layer_profile}_'
+    with tempfile.TemporaryDirectory(prefix=staging_prefix) as staging_root:
+        print(
+            f'Generating {len(forecast_hours)} ICON {layer_profile} frames for domains '
+            f'{", ".join(domain_ids)} in temporary workspace: {staging_root}'
+        )
+        temp_dirs = {}
+        generated_files_by_domain = {domain_id: [] for domain_id in domain_ids}
+        for domain_id in domain_ids:
+            temp_dir = os.path.join(staging_root, domain_id)
+            os.makedirs(temp_dir, exist_ok=True)
+            temp_dirs[domain_id] = temp_dir
+
+        accum_state = {'tot_prec': None, 'rain_con': None}
+        last_generated_hour = None
+        for forecast_hour in forecast_hours:
+            print(f'\nGenerating ICON {layer_profile} frame +{forecast_hour}hrs...')
+            use_prev = last_generated_hour == forecast_hour - 1
+            data, init_time, accum_state = get_icon_data(
+                forecast_hour,
+                icon_run,
+                remap_state,
+                prev_tp_values=(accum_state.get('tot_prec') if use_prev else None),
+                prev_rain_con_values=(accum_state.get('rain_con') if use_prev else None),
+                field_set=field_set,
+            )
+            last_generated_hour = forecast_hour
+            print(f'Using raw hourly ICON fields ({field_set})')
+
+            filename = f'ICON_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.{OUTPUT_IMAGE_EXT}'
+            for domain_id in domain_ids:
+                fig = plot_map(
+                    data,
+                    init_time,
+                    forecast_hour,
+                    model_name='ICON',
+                    layer_profile=layer_profile,
+                    domain_id=domain_id,
+                )
+                temp_filepath = os.path.join(temp_dirs[domain_id], filename)
+                save_output_figure(fig, temp_filepath)
+                plt.close(fig)
+                generated_files_by_domain[domain_id].append(filename)
+                print(f'ICON {layer_profile} staged for {domain_id} at {temp_filepath}')
+
+        for domain_id in domain_ids:
+            print(
+                f'\nFinished building {len(generated_files_by_domain[domain_id])} ICON {layer_profile} '
+                f'frames for {domain_id}. Publishing to {output_dirs[domain_id]}...'
+            )
+            publish_generated_frames(
+                output_dirs[domain_id],
+                generated_files_by_domain[domain_id],
+                temp_dirs[domain_id],
+            )
+        if update_manifest:
+            write_frame_manifest()
+
+
+def _generate_icon_multi_panel_frames(
+    forecast_hours,
+    *,
+    field_set,
+    panels,
+    preferred_run_time=None,
+    icon_run=None,
+    remap_state=None,
+    update_manifest=True,
+    domain_ids=None,
+    output_root=None,
+):
+    """Fetch one ICON field set per hour and plot multiple panels/domains."""
+    domain_ids = normalize_domain_ids(domain_ids)
+    output_dirs_by_panel = {}
+    for panel in panels:
+        output_dirs_by_panel[panel['panel_name']] = resolve_panel_output_dirs(
+            domain_ids,
+            panel['category'],
+            panel['panel_name'],
+            output_root=output_root,
+        )
+        for domain_output_dir in output_dirs_by_panel[panel['panel_name']].values():
+            os.makedirs(domain_output_dir, exist_ok=True)
+
+    if icon_run is None:
+        icon_run = get_latest_icon_run(target_time=preferred_run_time)
+    init_time = icon_run['init_time']
+    evict_stale_icon_cache(icon_run['run_stamp'])
+    if remap_state is None:
+        remap_state = _load_icon_static_remap(icon_run)
+
+    panel_labels = '/'.join(p['layer_profile'] for p in panels)
+    with tempfile.TemporaryDirectory(prefix=f'avmaps_icon_{field_set}_') as staging_root:
+        print(
+            f'Generating {len(forecast_hours)} ICON {panel_labels} frames for domains '
+            f'{", ".join(domain_ids)} in temporary workspace: {staging_root}'
+        )
+        temp_dirs = {
+            (panel['panel_name'], domain_id): os.path.join(staging_root, panel['panel_name'], domain_id)
+            for panel in panels
+            for domain_id in domain_ids
+        }
+        for path in temp_dirs.values():
+            os.makedirs(path, exist_ok=True)
+        generated = {
+            (panel['panel_name'], domain_id): []
+            for panel in panels
+            for domain_id in domain_ids
+        }
+
+        accum_state = {'tot_prec': None, 'rain_con': None}
+        last_generated_hour = None
+        for forecast_hour in forecast_hours:
+            print(f'\nGenerating ICON {panel_labels} frame +{forecast_hour}hrs...')
+            use_prev = last_generated_hour == forecast_hour - 1
+            data, init_time, accum_state = get_icon_data(
+                forecast_hour,
+                icon_run,
+                remap_state,
+                prev_tp_values=(accum_state.get('tot_prec') if use_prev else None),
+                prev_rain_con_values=(accum_state.get('rain_con') if use_prev else None),
+                field_set=field_set,
+            )
+            last_generated_hour = forecast_hour
+            filename = f'ICON_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.{OUTPUT_IMAGE_EXT}'
+            for panel in panels:
+                for domain_id in domain_ids:
+                    fig = plot_map(
+                        data,
+                        init_time,
+                        forecast_hour,
+                        model_name='ICON',
+                        layer_profile=panel['layer_profile'],
+                        domain_id=domain_id,
+                    )
+                    temp_filepath = os.path.join(temp_dirs[(panel['panel_name'], domain_id)], filename)
+                    save_output_figure(fig, temp_filepath)
+                    plt.close(fig)
+                    generated[(panel['panel_name'], domain_id)].append(filename)
+
+        for panel in panels:
+            for domain_id in domain_ids:
+                publish_generated_frames(
+                    output_dirs_by_panel[panel['panel_name']][domain_id],
+                    generated[(panel['panel_name'], domain_id)],
+                    temp_dirs[(panel['panel_name'], domain_id)],
+                )
+        if update_manifest:
+            write_frame_manifest()
+
+
+def generate_icon_airmass_fzl_frames(forecast_hours, **kwargs):
+    _generate_icon_product_frames(
+        forecast_hours,
+        field_set='airmass',
+        layer_profile='airmass_fzl',
+        category='Airmass',
+        panel_name='FZL ICON',
+        **kwargs,
+    )
+
+
+def generate_icon_airmass_snow_frames(forecast_hours, **kwargs):
+    _generate_icon_product_frames(
+        forecast_hours,
+        field_set='airmass',
+        layer_profile='airmass_snow',
+        category='Airmass',
+        panel_name='Snow level ICON',
+        **kwargs,
+    )
+
+
+def generate_icon_airmass_frames(forecast_hours, **kwargs):
+    _generate_icon_multi_panel_frames(
+        forecast_hours,
+        field_set='airmass',
+        panels=[
+            {'category': 'Airmass', 'panel_name': 'FZL ICON', 'layer_profile': 'airmass_fzl'},
+            {'category': 'Airmass', 'panel_name': 'Snow level ICON', 'layer_profile': 'airmass_snow'},
+        ],
+        **kwargs,
+    )
+
+
+def generate_icon_ts_flash_frames(forecast_hours, **kwargs):
+    _generate_icon_product_frames(
+        forecast_hours,
+        field_set='ts_flash',
+        layer_profile='ts_flash',
+        category='TS',
+        panel_name='Flash density ICON',
+        **kwargs,
+    )
+
+
+def generate_icon_ts_severe_frames(forecast_hours, **kwargs):
+    _generate_icon_product_frames(
+        forecast_hours,
+        field_set='ts_severe',
+        layer_profile='ts_severe',
+        category='TS',
+        panel_name='Severe storm potential ICON',
+        **kwargs,
+    )
+
+
+def generate_icon_ts_frames(forecast_hours, **kwargs):
+    # Lean union of flash + severe requirements: one fetch/hour, both panels.
+    _generate_icon_multi_panel_frames(
+        forecast_hours,
+        field_set='ts_bundle',
+        panels=[
+            {'category': 'TS', 'panel_name': 'Flash density ICON', 'layer_profile': 'ts_flash'},
+            {'category': 'TS', 'panel_name': 'Severe storm potential ICON', 'layer_profile': 'ts_severe'},
+        ],
+        **kwargs,
+    )
+
+
+def generate_icon_turb_wind_frames(forecast_hours, **kwargs):
+    _generate_icon_product_frames(
+        forecast_hours,
+        field_set='turb_wind',
+        layer_profile='turb_wind',
+        category='Turb',
+        panel_name='Wind ICON',
+        **kwargs,
+    )
+
+
+def generate_icon_turb_mtw_frames(forecast_hours, **kwargs):
+    _generate_icon_product_frames(
+        forecast_hours,
+        field_set='turb_mtw',
+        layer_profile='turb_mtw',
+        category='Turb',
+        panel_name='MTW ICON',
+        **kwargs,
+    )
+
+
+def generate_icon_turb_frames(forecast_hours, **kwargs):
+    _generate_icon_multi_panel_frames(
+        forecast_hours,
+        field_set='turb_bundle',
+        panels=[
+            {'category': 'Turb', 'panel_name': 'MTW ICON', 'layer_profile': 'turb_mtw'},
+            {'category': 'Turb', 'panel_name': 'Wind ICON', 'layer_profile': 'turb_wind'},
+        ],
+        **kwargs,
+    )
 
 
 def generate_all_layers_atomically(forecast_hours, model='both', domain_ids=None):
@@ -3872,8 +4596,7 @@ def generate_all_layers_atomically(forecast_hours, model='both', domain_ids=None
                 ])
 
         if model in ('icon', 'both'):
-            generate_icon_bg_frames(
-                forecast_hours,
+            icon_kwargs = dict(
                 preferred_run_time=(gfs_init_time if model == 'both' else None),
                 icon_run=icon_run,
                 remap_state=icon_remap_state,
@@ -3881,7 +4604,30 @@ def generate_all_layers_atomically(forecast_hours, model='both', domain_ids=None
                 domain_ids=domain_ids,
                 output_root=stage_output_root,
             )
+
+            generate_icon_bg_frames(forecast_hours, **icon_kwargs)
             staged_targets.extend([os.path.join('images', 'domains', domain_id, 'BG', 'ICON') for domain_id in domain_ids])
+
+            generate_icon_airmass_frames(forecast_hours, **icon_kwargs)
+            for domain_id in domain_ids:
+                staged_targets.extend([
+                    os.path.join('images', 'domains', domain_id, 'Airmass', 'FZL ICON'),
+                    os.path.join('images', 'domains', domain_id, 'Airmass', 'Snow level ICON'),
+                ])
+
+            generate_icon_ts_frames(forecast_hours, **icon_kwargs)
+            for domain_id in domain_ids:
+                staged_targets.extend([
+                    os.path.join('images', 'domains', domain_id, 'TS', 'Flash density ICON'),
+                    os.path.join('images', 'domains', domain_id, 'TS', 'Severe storm potential ICON'),
+                ])
+
+            generate_icon_turb_frames(forecast_hours, **icon_kwargs)
+            for domain_id in domain_ids:
+                staged_targets.extend([
+                    os.path.join('images', 'domains', domain_id, 'Turb', 'MTW ICON'),
+                    os.path.join('images', 'domains', domain_id, 'Turb', 'Wind ICON'),
+                ])
 
         if model in ('gfs', 'both'):
             generate_gfs_bg_frames(
@@ -3916,56 +4662,70 @@ def main():
         generate_all_layers_atomically(forecast_hours, model=args.model, domain_ids=domain_ids)
         return
 
-    if args.layer == 'ts_flash':
-        if args.model != 'gfs':
-            raise ValueError('The ts_flash layer is currently supported for GFS only')
-        generate_gfs_ts_flash_frames(forecast_hours, domain_ids=domain_ids)
-        return
-
-    if args.layer == 'ts_severe':
-        if args.model != 'gfs':
-            raise ValueError('The ts_severe layer is currently supported for GFS only')
-        generate_gfs_ts_severe_frames(forecast_hours, domain_ids=domain_ids)
-        return
-
-    if args.layer == 'airmass_fzl':
-        if args.model != 'gfs':
-            raise ValueError('The airmass_fzl layer is currently supported for GFS only')
-        generate_gfs_airmass_fzl_frames(forecast_hours, domain_ids=domain_ids)
-        return
-
-    if args.layer == 'airmass_snow':
-        if args.model != 'gfs':
-            raise ValueError('The airmass_snow layer is currently supported for GFS only')
-        generate_gfs_airmass_snow_frames(forecast_hours, domain_ids=domain_ids)
-        return
-
-    if args.layer == 'turb':
-        if args.model != 'gfs':
-            raise ValueError('The turb layer is currently supported for GFS only')
-        generate_gfs_turb_frames(forecast_hours, domain_ids=domain_ids)
-        return
-
-    if args.layer == 'turb_mtw':
-        if args.model != 'gfs':
-            raise ValueError('The turb_mtw layer is currently supported for GFS only')
-        generate_gfs_turb_mtw_frames(forecast_hours, domain_ids=domain_ids)
-        return
-
-    if args.layer == 'turb_wind':
-        if args.model != 'gfs':
-            raise ValueError('The turb_wind layer is currently supported for GFS only')
-        generate_gfs_turb_wind_frames(forecast_hours, domain_ids=domain_ids)
-        return
-
     gfs_run_time = None
     if args.model in ('gfs', 'both'):
         _, gfs_run_time = get_latest_gfs_dataset()
+
+    icon_kwargs = {}
+    if args.model in ('icon', 'both'):
+        preferred_time = gfs_run_time if args.model == 'both' else None
+        icon_kwargs['preferred_run_time'] = preferred_time
+
+    if args.layer == 'ts_flash':
+        if args.model in ('gfs', 'both'):
+            generate_gfs_ts_flash_frames(forecast_hours, domain_ids=domain_ids)
+        if args.model in ('icon', 'both'):
+            generate_icon_ts_flash_frames(forecast_hours, domain_ids=domain_ids, **icon_kwargs)
+        return
+
+    if args.layer == 'ts_severe':
+        if args.model in ('gfs', 'both'):
+            generate_gfs_ts_severe_frames(forecast_hours, domain_ids=domain_ids)
+        if args.model in ('icon', 'both'):
+            generate_icon_ts_severe_frames(forecast_hours, domain_ids=domain_ids, **icon_kwargs)
+        return
+
+    if args.layer == 'airmass_fzl':
+        if args.model in ('gfs', 'both'):
+            generate_gfs_airmass_fzl_frames(forecast_hours, domain_ids=domain_ids)
+        if args.model in ('icon', 'both'):
+            generate_icon_airmass_fzl_frames(forecast_hours, domain_ids=domain_ids, **icon_kwargs)
+        return
+
+    if args.layer == 'airmass_snow':
+        if args.model in ('gfs', 'both'):
+            generate_gfs_airmass_snow_frames(forecast_hours, domain_ids=domain_ids)
+        if args.model in ('icon', 'both'):
+            generate_icon_airmass_snow_frames(forecast_hours, domain_ids=domain_ids, **icon_kwargs)
+        return
+
+    if args.layer == 'turb':
+        if args.model in ('gfs', 'both'):
+            generate_gfs_turb_frames(forecast_hours, domain_ids=domain_ids)
+        if args.model in ('icon', 'both'):
+            generate_icon_turb_wind_frames(forecast_hours, domain_ids=domain_ids, **icon_kwargs)
+            generate_icon_turb_mtw_frames(forecast_hours, domain_ids=domain_ids, **icon_kwargs)
+        return
+
+    if args.layer == 'turb_mtw':
+        if args.model in ('gfs', 'both'):
+            generate_gfs_turb_mtw_frames(forecast_hours, domain_ids=domain_ids)
+        if args.model in ('icon', 'both'):
+            generate_icon_turb_mtw_frames(forecast_hours, domain_ids=domain_ids, **icon_kwargs)
+        return
+
+    if args.layer == 'turb_wind':
+        if args.model in ('gfs', 'both'):
+            generate_gfs_turb_wind_frames(forecast_hours, domain_ids=domain_ids)
+        if args.model in ('icon', 'both'):
+            generate_icon_turb_wind_frames(forecast_hours, domain_ids=domain_ids, **icon_kwargs)
+        return
+
+    if args.model in ('gfs', 'both'):
         generate_gfs_bg_frames(forecast_hours, domain_ids=domain_ids)
 
     if args.model in ('icon', 'both'):
-        preferred_time = gfs_run_time if args.model == 'both' else None
-        generate_icon_bg_frames(forecast_hours, preferred_run_time=preferred_time, domain_ids=domain_ids)
+        generate_icon_bg_frames(forecast_hours, domain_ids=domain_ids, **icon_kwargs)
 
 if __name__ == '__main__':
     main()

@@ -93,12 +93,20 @@
         workspaceEl = document.querySelector('.map-workspace');
         pinTargets = [
             {
-                pinEl: document.getElementById('sounding-pin-left'),
+                pinEl: document.getElementById('sounding-pin-top-left'),
                 imgEl: document.getElementById('left-image'),
             },
             {
-                pinEl: document.getElementById('sounding-pin-right'),
+                pinEl: document.getElementById('sounding-pin-top-right'),
                 imgEl: document.getElementById('right-image'),
+            },
+            {
+                pinEl: document.getElementById('sounding-pin-bottom-left'),
+                imgEl: document.getElementById('bottom-left-image'),
+            },
+            {
+                pinEl: document.getElementById('sounding-pin-bottom-right'),
+                imgEl: document.getElementById('bottom-right-image'),
             },
         ];
 
@@ -1818,6 +1826,24 @@
         });
     }
 
+    function isPinTargetVisible(target) {
+        const img = target?.imgEl;
+        if (!img?.complete || !img.naturalWidth || !img.naturalHeight) {
+            return false;
+        }
+        const panel = img.closest('.image-panel');
+        if (!panel) {
+            return false;
+        }
+        // Pair layout hides the bottom row; skip those targets entirely.
+        const pair = document.getElementById('image-pair');
+        if (panel.classList.contains('quad-only') && pair?.classList.contains('layout-pair')) {
+            return false;
+        }
+        const rect = img.getBoundingClientRect();
+        return rect.width > 1 && rect.height > 1;
+    }
+
     function syncPin() {
         ensureUi();
         if (!panelOpen || !Number.isFinite(pinLat) || !Number.isFinite(pinLon)) {
@@ -1827,6 +1853,11 @@
 
         pinTargets.forEach((target) => {
             if (!target?.pinEl || !target?.imgEl) return;
+            if (!isPinTargetVisible(target)) {
+                target.pinEl.classList.add('hidden');
+                target.pinEl.setAttribute('aria-hidden', 'true');
+                return;
+            }
             const offsets = window.MapGeoref?.lonLatToImageOffsets?.(target.imgEl, pinLon, pinLat);
             if (!offsets) {
                 target.pinEl.classList.add('hidden');

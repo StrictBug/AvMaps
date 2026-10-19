@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Aviation map viewer</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=axis-max-8">
 </head>
 <body class="loading">
     <header>
@@ -47,28 +47,40 @@
     <main class="main-content">
         <div class="image-container">
             <div class="map-workspace">
-                <div class="image-pair" id="image-pair">
-                    <div class="image-panel left-panel">
-                        <button class="map-expand-btn" type="button" data-expand-panel="left" aria-pressed="false" aria-label="Expand left map" title="Expand map">
-                            <svg class="map-expand-icon expand" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-                                <path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                            <svg class="map-expand-icon collapse" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-                                <path d="M6 2v4H2M10 2v4h4M14 10h-4v4M2 10h4v4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                        </button>
-                        <img id="left-image" src="" alt="Left Image">
+                <div
+                    class="image-pair map-table layout-pair"
+                    id="image-pair"
+                    role="table"
+                    aria-label="Forecast map table"
+                    data-cols="2"
+                    data-rows="1"
+                >
+                    <button type="button" class="map-table-corner" id="map-run-label" aria-label="Restore full map table">—</button>
+                    <button type="button" class="map-col-header" data-col="0" id="map-col-header-0" aria-pressed="false" title="Maximize column">
+                        <span class="map-axis-label">GFS</span>
+                    </button>
+                    <button type="button" class="map-col-header" data-col="1" id="map-col-header-1" aria-pressed="false" title="Maximize column">
+                        <span class="map-axis-label">ICON</span>
+                    </button>
+
+                    <button type="button" class="map-row-header" data-row="0" id="map-row-header-0" aria-pressed="false" title="Maximize row">
+                        <span class="map-axis-label"></span>
+                    </button>
+                    <div class="image-panel left-panel top-left-panel" data-panel="topLeft" data-row="0" data-col="0">
+                        <img id="left-image" class="map-image" data-panel="topLeft" src="" alt="Top-left map">
                     </div>
-                    <div class="image-panel right-panel">
-                        <button class="map-expand-btn" type="button" data-expand-panel="right" aria-pressed="false" aria-label="Expand right map" title="Expand map">
-                            <svg class="map-expand-icon expand" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-                                <path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                            <svg class="map-expand-icon collapse" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-                                <path d="M6 2v4H2M10 2v4h4M14 10h-4v4M2 10h4v4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                        </button>
-                        <img id="right-image" src="" alt="Right Image">
+                    <div class="image-panel right-panel top-right-panel" data-panel="topRight" data-row="0" data-col="1">
+                        <img id="right-image" class="map-image" data-panel="topRight" src="" alt="Top-right map">
+                    </div>
+
+                    <button type="button" class="map-row-header quad-only" data-row="1" id="map-row-header-1" aria-pressed="false" title="Maximize row">
+                        <span class="map-axis-label"></span>
+                    </button>
+                    <div class="image-panel bottom-left-panel quad-only" data-panel="bottomLeft" data-row="1" data-col="0">
+                        <img id="bottom-left-image" class="map-image" data-panel="bottomLeft" src="" alt="Bottom-left map">
+                    </div>
+                    <div class="image-panel bottom-right-panel quad-only" data-panel="bottomRight" data-row="1" data-col="1">
+                        <img id="bottom-right-image" class="map-image" data-panel="bottomRight" src="" alt="Bottom-right map">
                     </div>
                 </div>
                 <div
@@ -146,14 +158,24 @@
             </div>
 
             <div class="info-section">
+                <h3>Map layout</h3>
+                <p>Click a column header to maximize that model</p>
+                <p>Click a row header to maximize that product</p>
+                <p>Combine both for a single map</p>
+                <p><span class="key-chip">Esc</span> Restore full table</p>
+            </div>
+
+            <div class="info-section">
                 <h3>Sounding</h3>
                 <p><span class="key-chip">B</span> Toggle sounding tool</p>
             </div>
         </div>
     </div>
 
-    <div id="sounding-pin-left" class="sounding-pin hidden" aria-hidden="true"></div>
-    <div id="sounding-pin-right" class="sounding-pin hidden" aria-hidden="true"></div>
+    <div id="sounding-pin-top-left" class="sounding-pin hidden" aria-hidden="true"></div>
+    <div id="sounding-pin-top-right" class="sounding-pin hidden" aria-hidden="true"></div>
+    <div id="sounding-pin-bottom-left" class="sounding-pin hidden" aria-hidden="true"></div>
+    <div id="sounding-pin-bottom-right" class="sounding-pin hidden" aria-hidden="true"></div>
 
     <div class="controls">
             <div class="legend-strip" id="legend-strip" aria-live="polite">
@@ -204,7 +226,7 @@
             </div>
         </div>
 
-    <script src="sounding.js"></script>
-    <script src="script.js"></script>
+    <script src="sounding.js?v=axis-max-9"></script>
+    <script src="script.js?v=axis-max-9"></script>
 </body>
 </html>

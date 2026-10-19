@@ -2,10 +2,18 @@
 .icon_cache/
 
 # Python
+.venv/
 __pycache__/
 *.pyc
 *.pyo
 
+# OS / local junk
+.DS_Store
+
 # Generated site assets are deployed via GitHub Pages artifacts, not committed.
 images/domains/
 images/manifest.json
+
+# Local-only media / scratch
+*.mov
+review_turb_wind.html
