@@ -87,6 +87,7 @@
     let lastRequestedValidTime = null;
     // Fixed T/P axes for the current pin/model so playback doesn't rescale every hour.
     let lockedAxes = null;
+    let lockedHodo = null;
     let loadGeneration = 0;
     let storedPanelSizePx = null;
     let resizeRaf = 0;
@@ -462,6 +463,7 @@
 
         // Model changes need a fresh axis lock, view window, and profile fetch.
         lockedAxes = null;
+        lockedHodo = null;
         lastValidTimeIso = null;
         lastProfile = null;
         resetViewExtents();
@@ -1479,6 +1481,50 @@
         );
     }
 
+    function pinMatchesLockedHodo(lat, lon, modelId = selectedModelId) {
+        if (!lockedHodo) return false;
+        return (
+            Math.abs(lockedHodo.lat - lat) < 1e-4
+            && Math.abs(lockedHodo.lon - lon) < 1e-4
+            && lockedHodo.model === normalizeModelId(modelId)
+        );
+    }
+
+    function maxWindSpeedFromHourly(hourly) {
+        let max = 0;
+        Object.entries(hourly || {}).forEach(([key, series]) => {
+            if (!key.startsWith('wind_speed_') || !Array.isArray(series)) {
+                return;
+            }
+            series.forEach((value) => {
+                if (Number.isFinite(value) && value > max) {
+                    max = value;
+                }
+            });
+        });
+        return max;
+    }
+
+    function hodoHalfFromMaxSpeed(maxObserved) {
+        return Math.max(40, Math.ceil((maxObserved + 5) / 10) * 10);
+    }
+
+    function updateLockedHodoFromHourly(hourly, lat, lon, modelId = selectedModelId) {
+        const model = normalizeModelId(modelId);
+        const half = hodoHalfFromMaxSpeed(maxWindSpeedFromHourly(hourly));
+        if (!pinMatchesLockedHodo(lat, lon, model)) {
+            lockedHodo = { half, lat, lon, model };
+            return lockedHodo;
+        }
+        lockedHodo = {
+            half: Math.max(lockedHodo.half || 0, half),
+            lat,
+            lon,
+            model,
+        };
+        return lockedHodo;
+    }
+
     function updateLockedAxesFromHourly(hourly, lat, lon, modelId = selectedModelId) {
         const width = canvasEl?.clientWidth || 640;
         const height = canvasEl?.clientHeight || 520;
@@ -2131,7 +2177,11 @@
         const radius = Math.max(Math.min(innerW, innerH) / 2 - 6, 20);
         const points = profileWindPoints(profile);
         const maxObserved = points.reduce((max, point) => Math.max(max, Math.hypot(point.u, point.v)), 0);
-        const maxSpeed = Math.max(40, Math.ceil((maxObserved + 5) / 10) * 10);
+        const hourHalf = hodoHalfFromMaxSpeed(maxObserved);
+        const lockedHalf = pinMatchesLockedHodo(profile.latitude, profile.longitude, profile.model)
+            ? lockedHodo.half
+            : null;
+        const maxSpeed = Math.max(hourHalf, Number.isFinite(lockedHalf) ? lockedHalf : 0);
         const sessionKey = makeViewSessionKey(profile);
         if (sessionKey !== viewSessionKey) {
             viewSessionKey = sessionKey;
@@ -2535,6 +2585,9 @@
 
     function isSiteInAnyMapDomain(site) {
         const domainIds = window.MapGeoref?.getDomainIds?.() || [];
+        if (!domainIds.length) {
+            return true;
+        }
         return domainIds.some((domainId) => window.MapGeoref?.isLonLatInDomain?.(site.lon, site.lat, domainId));
     }
 
@@ -2600,6 +2653,7 @@
         lastValidTimeIso = null;
         lastProfile = null;
         lockedAxes = null;
+        lockedHodo = null;
         resetViewExtents();
     }
 
@@ -2724,6 +2778,7 @@
 
             // Lock / expand axes from the full day at this pin so animation stays stable.
             updateLockedAxesFromHourly(hourly, pinLat, pinLon, modelMeta.id);
+            updateLockedHodoFromHourly(hourly, pinLat, pinLon, modelMeta.id);
 
             metaEl.textContent = formatLatLon(pinLat, pinLon);
             if (statusEl) {
@@ -2768,6 +2823,7 @@
         }
         lastValidTimeIso = null;
         lockedAxes = null;
+        lockedHodo = null;
         resetViewExtents();
         if (model != null) {
             setSelectedModel(model, { reload: false });
@@ -2820,6 +2876,7 @@
         lastValidTimeIso = null;
         lastRequestedValidTime = null;
         lockedAxes = null;
+        lockedHodo = null;
         resetViewExtents();
         endPanInteraction();
         setSoundingLoading(false);

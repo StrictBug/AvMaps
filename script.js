@@ -163,14 +163,21 @@ function syncAxisMaximizeButtons() {
 
     const maxCol = getAxisMaxValue(pair, 'col');
     const maxRow = getAxisMaxValue(pair, 'row');
-    const quad = isQuadCategory(currentCategory);
     pair.classList.toggle('has-axis-max', Boolean(maxCol || maxRow));
 
     pair.querySelectorAll('.map-col-header').forEach((header) => {
         const col = header.getAttribute('data-col');
         const title = config?.columns?.[Number(col)]?.title || `Column ${Number(col) + 1}`;
+        const colAvailable = Number(col) < (config?.columns?.length || 0);
+        const canMaximize = colAvailable && (config?.columns?.length || 0) > 1;
         const pressed = maxCol === col;
+        header.disabled = !canMaximize;
         header.setAttribute('aria-pressed', pressed ? 'true' : 'false');
+        if (!canMaximize) {
+            header.title = title;
+            header.setAttribute('aria-label', title);
+            return;
+        }
         header.title = pressed ? `Restore full width (${title})` : `Maximize ${title} column`;
         header.setAttribute('aria-label', header.title);
     });
@@ -178,11 +185,12 @@ function syncAxisMaximizeButtons() {
     pair.querySelectorAll('.map-row-header').forEach((header) => {
         const row = header.getAttribute('data-row');
         const title = config?.rows?.[Number(row)]?.title || `Row ${Number(row) + 1}`;
-        const pressed = maxRow === row;
         const rowAvailable = Number(row) < (config?.rows?.length || 0);
-        header.disabled = !rowAvailable;
+        const canMaximize = rowAvailable && (config?.rows?.length || 0) > 1;
+        const pressed = maxRow === row;
+        header.disabled = !canMaximize;
         header.setAttribute('aria-pressed', pressed ? 'true' : 'false');
-        if (!rowAvailable) {
+        if (!canMaximize) {
             header.title = title;
             header.setAttribute('aria-label', title);
             return;
@@ -190,20 +198,6 @@ function syncAxisMaximizeButtons() {
         header.title = pressed ? `Restore full height (${title})` : `Maximize ${title} row`;
         header.setAttribute('aria-label', header.title);
     });
-
-    // Pair layout has a single product column — maximizing it is a no-op.
-    if (!quad) {
-        pair.querySelectorAll('.map-col-header').forEach((header) => {
-            const col = header.getAttribute('data-col');
-            const title = config?.columns?.[Number(col)]?.title || `Column ${Number(col) + 1}`;
-            const available = Number(col) < (config?.columns?.length || 0);
-            header.disabled = !available || (config?.columns?.length || 0) <= 1;
-            if (header.disabled) {
-                header.title = title;
-                header.setAttribute('aria-label', title);
-            }
-        });
-    }
 
     const runLabel = document.getElementById('map-run-label');
     if (runLabel) {
@@ -226,7 +220,11 @@ function setAxisMaximize(axis, value, { notify = true } = {}) {
     }
 
     const next = value === '0' || value === '1' ? value : '';
-    if (axis === 'row' && next && !isQuadCategory(currentCategory)) {
+    const config = imageConfig[currentCategory];
+    const axisCount = axis === 'col'
+        ? (config?.columns?.length || 0)
+        : (config?.rows?.length || 0);
+    if (next && (Number(next) >= axisCount || axisCount <= 1)) {
         return;
     }
 
@@ -2147,6 +2145,9 @@ function setupEventListeners() {
     document.querySelectorAll('.map-col-header').forEach((btn) => {
         btn.addEventListener('click', function(event) {
             event.preventDefault();
+            if (this.disabled) {
+                return;
+            }
             toggleAxisMaximize('col', this.getAttribute('data-col'));
         });
     });

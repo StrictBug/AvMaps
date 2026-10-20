@@ -132,7 +132,7 @@ h1 {
     align-items: stretch;
 }
 
-/* Model × product table: column headers = models, row headers = products.
+/* Model × product table: column headers = products, row headers = models.
    Click headers to maximize that axis via data-max-col / data-max-row. */
 .image-pair.map-table {
     position: relative;
@@ -345,14 +345,10 @@ h1 {
 .image-pair.map-table .bottom-right-panel { grid-area: cell11; }
 
 /* Column maximize */
-.image-pair.map-table[data-max-col="0"] {
-    grid-template-columns: var(--map-table-row-header-width) minmax(0, 1fr);
-    grid-template-areas:
-        "corner col0"
-        "row0 cell00"
-        "row1 cell10";
-}
+.image-pair.map-table[data-max-col="0"],
+.image-pair.map-table.layout-quad[data-max-col="0"],
 .image-pair.map-table.layout-pair[data-max-col="0"] {
+    grid-template-columns: var(--map-table-row-header-width) minmax(0, 1fr);
     grid-template-areas:
         "corner col0"
         "row0 cell00"
@@ -363,7 +359,8 @@ h1 {
     display: none;
 }
 
-.image-pair.map-table[data-max-col="1"] {
+.image-pair.map-table[data-max-col="1"],
+.image-pair.map-table.layout-quad[data-max-col="1"] {
     grid-template-columns: var(--map-table-row-header-width) minmax(0, 1fr);
     grid-template-areas:
         "corner col1"

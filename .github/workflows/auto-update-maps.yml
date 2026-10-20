@@ -14,6 +14,7 @@ on:
       - favicon.svg
       - generate_maps.py
       - index.html
+      - aerodrome_lat_long.csv
       - requirements.txt
       - script.js
       - sounding.js
@@ -96,6 +97,9 @@ jobs:
           rm -rf _site
           mkdir -p _site
           cp index.html script.js sounding.js styles.css favicon.svg _site/
+          if [ -f aerodrome_lat_long.csv ]; then
+            cp aerodrome_lat_long.csv _site/
+          fi
           cp -R images _site/
 
       - name: Upload Pages artifact
