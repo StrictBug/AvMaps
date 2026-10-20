@@ -1,5 +1,7 @@
 name: Build and deploy aviation maps
 
+# On AvMaps (production): schedule + main push + manual.
+# On AvMaps-preview: same workflow file; production AvMaps is never touched by preview deploys.
 on:
   schedule:
     - cron: '15 */2 * * *'

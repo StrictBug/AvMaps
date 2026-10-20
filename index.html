@@ -5,16 +5,29 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Aviation map viewer</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=profile-tools-1">
 </head>
 <body class="loading">
     <header>
         <div class="title-section">
             <h1>Aviation map viewer</h1>
             <div class="title-actions">
-                <button id="sounding-tool-btn" class="tool-btn" type="button" aria-pressed="false" aria-label="Toggle sounding tool" title="Sounding tool">
+                <button id="sounding-tool-btn" class="tool-btn" type="button" aria-pressed="false" aria-label="Sounding (S)" title="Sounding (S)">
                     <svg class="balloon-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                         <path d="M12 1.8c-3.7 0-6.7 3.1-6.7 7 0 3.2 2.1 5.9 5.1 6.7L9.2 21.2h5.6l-1.2-5.7c3-.8 5.1-3.5 5.1-6.7 0-3.9-3-7-6.7-7zm0 2.2c2.5 0 4.5 2.1 4.5 4.8S14.5 13.6 12 13.6 7.5 11.5 7.5 8.8 9.5 4 12 4z"/>
+                    </svg>
+                </button>
+                <button id="profile-table-tool-btn" class="tool-btn" type="button" aria-pressed="false" aria-label="Profile table (P)" title="Profile table (P)">
+                    <svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <rect x="4.2" y="5" width="15.6" height="14" rx="1.4"/>
+                        <path d="M4.2 10h15.6M4.2 15h15.6M10 5v14"/>
+                    </svg>
+                </button>
+                <button id="hodograph-tool-btn" class="tool-btn" type="button" aria-pressed="false" aria-label="Hodograph (H)" title="Hodograph (H)">
+                    <svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <circle cx="12" cy="12" r="8.2"/>
+                        <circle cx="12" cy="12" r="4.4"/>
+                        <path d="M12 12l5.2-3.4"/>
                     </svg>
                 </button>
                 <button id="info-btn" class="info-btn" type="button" aria-label="Show keyboard controls" title="Keyboard controls">i</button>
@@ -47,28 +60,43 @@
     <main class="main-content">
         <div class="image-container">
             <div class="map-workspace">
-                <div class="image-pair" id="image-pair">
-                    <div class="image-panel left-panel">
-                        <button class="map-expand-btn" type="button" data-expand-panel="left" aria-pressed="false" aria-label="Expand left map" title="Expand map">
-                            <svg class="map-expand-icon expand" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-                                <path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                            <svg class="map-expand-icon collapse" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-                                <path d="M6 2v4H2M10 2v4h4M14 10h-4v4M2 10h4v4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                        </button>
-                        <img id="left-image" src="" alt="Left Image">
+                <div
+                    class="image-pair map-table layout-pair"
+                    id="image-pair"
+                    role="table"
+                    aria-label="Forecast map table"
+                    data-cols="2"
+                    data-rows="1"
+                >
+                    <button type="button" class="map-table-corner" id="map-run-label" aria-label="Restore full map table">—</button>
+                    <button type="button" class="map-col-header" data-col="0" id="map-col-header-0" aria-pressed="false" title="Maximize column">
+                        <span class="map-axis-label"></span>
+                    </button>
+                    <button type="button" class="map-col-header quad-only" data-col="1" id="map-col-header-1" aria-pressed="false" title="Maximize column">
+                        <span class="map-axis-label"></span>
+                    </button>
+
+                    <button type="button" class="map-row-header" data-row="0" id="map-row-header-0" aria-pressed="false" title="Maximize row">
+                        <span class="map-axis-label">GFS</span>
+                    </button>
+                    <div class="image-panel left-panel top-left-panel" data-panel="topLeft" data-row="0" data-col="0">
+                        <img id="left-image" class="map-image" data-panel="topLeft" src="" alt="Top-left map">
                     </div>
-                    <div class="image-panel right-panel">
-                        <button class="map-expand-btn" type="button" data-expand-panel="right" aria-pressed="false" aria-label="Expand right map" title="Expand map">
-                            <svg class="map-expand-icon expand" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-                                <path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                            <svg class="map-expand-icon collapse" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-                                <path d="M6 2v4H2M10 2v4h4M14 10h-4v4M2 10h4v4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                        </button>
-                        <img id="right-image" src="" alt="Right Image">
+                    <div class="image-panel right-panel top-right-panel quad-only" data-panel="topRight" data-row="0" data-col="1">
+                        <img id="right-image" class="map-image" data-panel="topRight" src="" alt="Top-right map">
+                    </div>
+
+                    <button type="button" class="map-row-header" data-row="1" id="map-row-header-1" aria-pressed="false" title="Maximize row">
+                        <span class="map-axis-label">ICON</span>
+                    </button>
+                    <div class="image-panel bottom-left-panel" data-panel="bottomLeft" data-row="1" data-col="0">
+                        <img id="bottom-left-image" class="map-image" data-panel="bottomLeft" src="" alt="Bottom-left map">
+                    </div>
+                    <div class="image-panel bottom-right-panel quad-only" data-panel="bottomRight" data-row="1" data-col="1">
+                        <img id="bottom-right-image" class="map-image" data-panel="bottomRight" src="" alt="Bottom-right map">
+                    </div>
+                    <div id="map-swap-loading" class="map-swap-loading hidden" aria-hidden="true" aria-live="polite">
+                        <div class="map-swap-loading-spinner" role="status" aria-label="Loading maps"></div>
                     </div>
                 </div>
                 <div
@@ -76,31 +104,56 @@
                     class="sounding-resize-handle hidden"
                     role="separator"
                     aria-orientation="vertical"
-                    aria-label="Resize sounding panel"
+                    aria-label="Resize profile panel"
                     aria-controls="sounding-panel"
                     tabindex="0"
                 ></div>
-                <aside id="sounding-panel" class="sounding-panel hidden" aria-hidden="true" aria-label="Sounding diagram">
+                <aside id="sounding-panel" class="sounding-panel hidden" aria-hidden="true" aria-label="Profile panel">
                     <div class="sounding-panel-header">
-                        <p id="sounding-meta" class="sounding-meta">Enable the balloon tool, then click a map point.</p>
+                        <p id="sounding-meta" class="sounding-meta">Enable a profile tool, then click a map point.</p>
                         <div class="sounding-header-actions">
+                            <label class="sounding-model-picker" for="sounding-location-select">
+                                <span class="sounding-model-picker-label">Location</span>
+                                <select id="sounding-location-select" class="sounding-model-select sounding-location-select" aria-label="Profile location">
+                                    <option value="__map__">Map point</option>
+                                </select>
+                            </label>
                             <label class="sounding-model-picker" for="sounding-model-select">
                                 <span class="sounding-model-picker-label">Model</span>
-                                <select id="sounding-model-select" class="sounding-model-select" aria-label="Sounding model">
+                                <select id="sounding-model-select" class="sounding-model-select" aria-label="Profile model">
                                     <option value="gfs_seamless">GFS</option>
                                     <option value="icon_seamless">ICON</option>
                                 </select>
                             </label>
-                            <button id="sounding-close-btn" class="sounding-close-btn" type="button" aria-label="Close sounding panel">×</button>
+                            <button id="sounding-close-btn" class="sounding-close-btn" type="button" aria-label="Close profile panel">×</button>
                         </div>
                     </div>
                     <p id="sounding-status" class="sounding-status" aria-live="polite"></p>
-                    <div class="sounding-canvas-wrap">
-                        <canvas id="sounding-canvas" class="sounding-canvas" width="480" height="640"></canvas>
-                        <div id="sounding-loading" class="sounding-loading hidden" aria-hidden="true" aria-live="polite">
-                            <div class="sounding-loading-spinner" role="status" aria-label="Loading sounding"></div>
+                    <div id="sounding-view-stack" class="sounding-view-stack">
+                        <div class="sounding-canvas-wrap">
+                            <canvas id="sounding-canvas" class="sounding-canvas" width="480" height="640"></canvas>
+                            <div id="sounding-hover" class="sounding-hover hidden" aria-live="polite"></div>
                         </div>
-                        <div id="sounding-hover" class="sounding-hover hidden" aria-live="polite"></div>
+                        <div id="sounding-table-wrap" class="sounding-table-wrap hidden">
+                            <div class="sounding-table-scroll">
+                                <table id="sounding-profile-table" class="sounding-profile-table">
+                                    <thead>
+                                        <tr>
+                                            <th>P (hPa)</th>
+                                            <th>Alt (ft AMSL)</th>
+                                            <th>Dir (°)</th>
+                                            <th>Spd (kt)</th>
+                                            <th>T (°C)</th>
+                                            <th>Td (°C)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="sounding-profile-table-body"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div id="sounding-loading" class="sounding-loading hidden" aria-hidden="true" aria-live="polite">
+                            <div class="sounding-loading-spinner" role="status" aria-label="Loading profile"></div>
+                        </div>
                     </div>
                 </aside>
             </div>
@@ -125,7 +178,7 @@
             <div class="info-section">
                 <h3>Switch Category</h3>
                 <p><span class="key-chip">F</span> Fog & Low Cloud</p>
-                <p><span class="key-chip">S</span> Thunderstorms</p>
+                <p><span class="key-chip">L</span> Thunderstorms</p>
                 <p><span class="key-chip">A</span> Airmass</p>
                 <p><span class="key-chip">T</span> Turbulence</p>
             </div>
@@ -146,14 +199,23 @@
             </div>
 
             <div class="info-section">
-                <h3>Sounding</h3>
-                <p><span class="key-chip">B</span> Toggle sounding tool</p>
+                <h3>Map layout</h3>
+                <p><span class="key-chip">Esc</span> Restore full table</p>
+            </div>
+
+            <div class="info-section">
+                <h3>Profile tools</h3>
+                <p><span class="key-chip">S</span> Sounding</p>
+                <p><span class="key-chip">P</span> Profile table</p>
+                <p><span class="key-chip">H</span> Hodograph</p>
             </div>
         </div>
     </div>
 
-    <div id="sounding-pin-left" class="sounding-pin hidden" aria-hidden="true"></div>
-    <div id="sounding-pin-right" class="sounding-pin hidden" aria-hidden="true"></div>
+    <div id="sounding-pin-top-left" class="sounding-pin hidden" aria-hidden="true"></div>
+    <div id="sounding-pin-top-right" class="sounding-pin hidden" aria-hidden="true"></div>
+    <div id="sounding-pin-bottom-left" class="sounding-pin hidden" aria-hidden="true"></div>
+    <div id="sounding-pin-bottom-right" class="sounding-pin hidden" aria-hidden="true"></div>
 
     <div class="controls">
             <div class="legend-strip" id="legend-strip" aria-live="polite">
@@ -204,7 +266,7 @@
             </div>
         </div>
 
-    <script src="sounding.js"></script>
-    <script src="script.js"></script>
+    <script src="sounding.js?v=sounding-label-1"></script>
+    <script src="script.js?v=hotkeys-s-l-1"></script>
 </body>
 </html>
