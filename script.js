@@ -1,68 +1,69 @@
+// Table axes: rows = models (GFS, ICON), columns = products.
 const imageConfig = {
     Airmass: {
         layout: 'quad',
         columns: [
-            { id: 'gfs', title: 'GFS' },
-            { id: 'icon', title: 'ICON' },
-        ],
-        rows: [
             { id: 'fzl', title: 'Freezing Level' },
             { id: 'snow', title: 'Snow Level' },
+        ],
+        rows: [
+            { id: 'gfs', title: 'GFS' },
+            { id: 'icon', title: 'ICON' },
         ],
         left: { folder: 'FZL', title: 'FZL' },
         right: { folder: 'Snow level', title: 'Snow Level' },
         topLeft: { title: 'Freezing Level' },
-        topRight: { title: 'Freezing Level' },
-        bottomLeft: { title: 'Snow Level' },
+        topRight: { title: 'Snow Level' },
+        bottomLeft: { title: 'Freezing Level' },
         bottomRight: { title: 'Snow Level' },
     },
     BG: {
         layout: 'pair',
         columns: [
-            { id: 'gfs', title: 'GFS' },
-            { id: 'icon', title: 'ICON' },
+            { id: 'fog', title: 'Fog & Low Cloud' },
         ],
         rows: [
-            { id: 'fog', title: 'Fog & Low Cloud' },
+            { id: 'gfs', title: 'GFS' },
+            { id: 'icon', title: 'ICON' },
         ],
         left: { folder: 'US', title: 'GFS' },
         right: { folder: 'ICON', title: 'ICON' },
         topLeft: { title: 'Fog & Low Cloud' },
-        topRight: { title: 'Fog & Low Cloud' },
+        bottomLeft: { title: 'Fog & Low Cloud' },
     },
     TS: {
         layout: 'quad',
         columns: [
-            { id: 'gfs', title: 'GFS' },
-            { id: 'icon', title: 'ICON' },
-        ],
-        rows: [
             { id: 'flash', title: 'Thunderstorms' },
             { id: 'severe', title: 'Storm Dynamics' },
+        ],
+        rows: [
+            { id: 'gfs', title: 'GFS' },
+            { id: 'icon', title: 'ICON' },
         ],
         left: { folder: 'Flash density', title: 'Flash Density' },
         right: { folder: 'Severe storm potential', title: 'Severe Storm Potential' },
         topLeft: { title: 'Thunderstorms' },
-        topRight: { title: 'Thunderstorms' },
-        bottomLeft: { title: 'Storm Dynamics' },
+        topRight: { title: 'Storm Dynamics' },
+        bottomLeft: { title: 'Thunderstorms' },
         bottomRight: { title: 'Storm Dynamics' },
     },
     Turb: {
         layout: 'quad',
         columns: [
+            { id: 'wind', title: 'Low Level Turbulence' },
+            { id: 'mtw', title: 'Mountain Waves' },
+        ],
+        rows: [
             { id: 'gfs', title: 'GFS' },
             { id: 'icon', title: 'ICON' },
         ],
-        rows: [
-            { id: 'mtw', title: 'Mountain Waves' },
-            { id: 'wind', title: 'Low Level Turbulence' },
-        ],
-        left: { folder: 'MTW', title: 'MTW' },
-        right: { folder: 'Wind', title: 'Wind' },
-        topLeft: { title: 'Mountain Waves' },
+        left: { folder: 'Wind', title: 'Wind' },
+        right: { folder: 'MTW', title: 'MTW' },
+        topLeft: { title: 'Low Level Turbulence' },
         topRight: { title: 'Mountain Waves' },
         bottomLeft: { title: 'Low Level Turbulence' },
-        bottomRight: { title: 'Low Level Turbulence' },
+        bottomRight: { title: 'Mountain Waves' },
     }
 };
 
@@ -96,14 +97,14 @@ function formatRunStamp(dateValue) {
     return `${year}/${month}/${day} ${hour}Z`;
 }
 
-function formatCornerRunHtml(framePair, columns) {
-    const runs = columns.map((column, index) => {
-        const stamp = formatRunStamp(getColumnRunDate(framePair, index));
+function formatCornerRunHtml(framePair, rows) {
+    const runs = rows.map((row, index) => {
+        const stamp = formatRunStamp(getRowRunDate(framePair, index));
         if (!stamp) {
             return null;
         }
         return {
-            title: column.title || `Col ${index + 1}`,
+            title: row.title || `Row ${index + 1}`,
             stamp,
         };
     }).filter(Boolean);
@@ -128,18 +129,19 @@ function formatCornerRunHtml(framePair, columns) {
     };
 }
 
-function getColumnRunDate(framePair, columnIndex) {
+function getRowRunDate(framePair, rowIndex) {
     if (!framePair) {
         return null;
     }
     const quad = isQuadCategory(currentCategory);
-    const path = columnIndex === 0
+    // Rows are models: GFS on top, ICON below.
+    const path = rowIndex === 0
         ? (quad
-            ? (framePair.topLeftPath || framePair.bottomLeftPath)
+            ? (framePair.topLeftPath || framePair.topRightPath)
             : (framePair.leftPath || framePair.topLeftPath))
         : (quad
-            ? (framePair.topRightPath || framePair.bottomRightPath)
-            : (framePair.rightPath || framePair.topRightPath));
+            ? (framePair.bottomLeftPath || framePair.bottomRightPath)
+            : (framePair.rightPath || framePair.bottomLeftPath));
     return parseValidDateFromFramePath(path);
 }
 
@@ -177,17 +179,10 @@ function syncAxisMaximizeButtons() {
         const row = header.getAttribute('data-row');
         const title = config?.rows?.[Number(row)]?.title || `Row ${Number(row) + 1}`;
         const pressed = maxRow === row;
-        const available = quad || row === '0';
-        header.disabled = !available;
+        const rowAvailable = Number(row) < (config?.rows?.length || 0);
+        header.disabled = !rowAvailable;
         header.setAttribute('aria-pressed', pressed ? 'true' : 'false');
-        if (!available) {
-            header.title = title;
-            header.setAttribute('aria-label', title);
-            return;
-        }
-        // Pair layout has only one product row — maximizing it is a no-op, so disable.
-        if (!quad) {
-            header.disabled = true;
+        if (!rowAvailable) {
             header.title = title;
             header.setAttribute('aria-label', title);
             return;
@@ -195,6 +190,20 @@ function syncAxisMaximizeButtons() {
         header.title = pressed ? `Restore full height (${title})` : `Maximize ${title} row`;
         header.setAttribute('aria-label', header.title);
     });
+
+    // Pair layout has a single product column — maximizing it is a no-op.
+    if (!quad) {
+        pair.querySelectorAll('.map-col-header').forEach((header) => {
+            const col = header.getAttribute('data-col');
+            const title = config?.columns?.[Number(col)]?.title || `Column ${Number(col) + 1}`;
+            const available = Number(col) < (config?.columns?.length || 0);
+            header.disabled = !available || (config?.columns?.length || 0) <= 1;
+            if (header.disabled) {
+                header.title = title;
+                header.setAttribute('aria-label', title);
+            }
+        });
+    }
 
     const runLabel = document.getElementById('map-run-label');
     if (runLabel) {
@@ -272,16 +281,19 @@ function updateMapTableChrome(framePair = null) {
     const rows = config.rows || [];
     const quad = isQuadCategory(currentCategory);
 
-    pair.dataset.cols = String(columns.length || 2);
-    pair.dataset.rows = String(quad ? Math.max(rows.length, 2) : 1);
+    pair.dataset.cols = String(Math.max(columns.length || 1, 1));
+    pair.dataset.rows = String(Math.max(rows.length || 1, 1));
     if (!pair.hasAttribute('data-max-col')) {
         pair.setAttribute('data-max-col', '');
     }
     if (!pair.hasAttribute('data-max-row')) {
         pair.setAttribute('data-max-row', '');
     }
-    // Pair layout cannot keep a maximized second row.
-    if (!quad && getAxisMaxValue(pair, 'row')) {
+    // Drop maximize state for axes that do not exist in this layout.
+    if (getAxisMaxValue(pair, 'col') && Number(getAxisMaxValue(pair, 'col')) >= columns.length) {
+        pair.setAttribute('data-max-col', '');
+    }
+    if (getAxisMaxValue(pair, 'row') && Number(getAxisMaxValue(pair, 'row')) >= rows.length) {
         pair.setAttribute('data-max-row', '');
     }
 
@@ -301,7 +313,14 @@ function updateMapTableChrome(framePair = null) {
         }
     });
 
-    // Clear unused row headers so pair layout cannot keep stale quad labels.
+    // Clear unused axis headers so stale labels cannot linger across categories.
+    for (let index = columns.length; index < 2; index += 1) {
+        const header = document.getElementById(`map-col-header-${index}`);
+        const label = header?.querySelector('.map-axis-label');
+        if (label) {
+            label.textContent = '';
+        }
+    }
     for (let index = rows.length; index < 2; index += 1) {
         const header = document.getElementById(`map-row-header-${index}`);
         const label = header?.querySelector('.map-axis-label');
@@ -316,7 +335,7 @@ function updateMapTableChrome(framePair = null) {
         return;
     }
 
-    const runDisplay = formatCornerRunHtml(framePair, columns);
+    const runDisplay = formatCornerRunHtml(framePair, rows);
     if (!runDisplay.title) {
         runLabel.textContent = runDisplay.html;
         runLabel.removeAttribute('data-run-title');
@@ -351,7 +370,7 @@ const domainHotkeys = {
 
 const categoryHotkeys = {
     f: 'BG',
-    s: 'TS',
+    l: 'TS',
     a: 'Airmass',
     t: 'Turb'
 };
@@ -607,21 +626,6 @@ const FALLBACK_LEGENDS = {
     },
     Turb: {
         left: {
-            title: 'MTW',
-            fields: [
-                {
-                    id: 'turb-mtw-intensity',
-                    label: 'Mountain wave intensity',
-                    units: 'm/s',
-                    items: [
-                        { color: '#ff9900', label: '0.2-0.4' },
-                        { color: '#ff0000', label: '0.4-0.6' },
-                        { color: '#ff00ff', label: '0.6+' },
-                    ],
-                },
-            ],
-        },
-        right: {
             title: 'Wind',
             fields: [
                 {
@@ -648,6 +652,21 @@ const FALLBACK_LEGENDS = {
                 },
             ],
         },
+        right: {
+            title: 'MTW',
+            fields: [
+                {
+                    id: 'turb-mtw-intensity',
+                    label: 'Mountain wave intensity',
+                    units: 'm/s',
+                    items: [
+                        { color: '#ff9900', label: '0.2-0.4' },
+                        { color: '#ff0000', label: '0.4-0.6' },
+                        { color: '#ff00ff', label: '0.6+' },
+                    ],
+                },
+            ],
+        },
     },
 };
 
@@ -656,6 +675,7 @@ let currentDomain = 'AU';
 let currentFrame = 1;
 const DEFAULT_MAX_FRAMES = 40;
 const DECODE_WINDOW_RADIUS = 15;
+const PRELOAD_CONCURRENCY = 8;
 let maxFrames = DEFAULT_MAX_FRAMES;
 let isPlaying = false;
 let animationInterval = null;
@@ -696,6 +716,8 @@ let infoCloseBtn;
 let legendStrip;
 let legendContent;
 let legendToggleBtn;
+let mapSwapLoading;
+let mapSwapGeneration = 0;
 let controlsPanel;
 
 let legendEnabled = false;
@@ -1087,6 +1109,7 @@ async function loadFrameManifest(forceRefresh = false) {
         }
 
         frameManifest = normalizeFrameManifest(await response.json());
+        window.SoundingViewer?.refreshLocationOptions?.();
     }
 
     return frameManifest;
@@ -1292,7 +1315,90 @@ function initializeElements() {
     legendStrip = document.getElementById('legend-strip');
     legendContent = document.getElementById('legend-content');
     legendToggleBtn = document.getElementById('legend-toggle-btn');
+    mapSwapLoading = document.getElementById('map-swap-loading');
     controlsPanel = document.querySelector('.controls');
+}
+
+function beginMapSwapLoading() {
+    mapSwapGeneration += 1;
+    const pair = getImagePairEl();
+    pair?.classList.add('is-swapping');
+    if (mapSwapLoading) {
+        mapSwapLoading.classList.remove('hidden');
+        mapSwapLoading.setAttribute('aria-hidden', 'false');
+    }
+    return mapSwapGeneration;
+}
+
+function endMapSwapLoading(token) {
+    if (token !== mapSwapGeneration) {
+        return;
+    }
+    const pair = getImagePairEl();
+    pair?.classList.remove('is-swapping');
+    if (mapSwapLoading) {
+        mapSwapLoading.classList.add('hidden');
+        mapSwapLoading.setAttribute('aria-hidden', 'true');
+    }
+}
+
+function getVisibleMapImages() {
+    return Object.values(mapImagesByPanel).filter((img) => {
+        if (!img) {
+            return false;
+        }
+        const panel = img.closest('.image-panel');
+        if (!panel || getComputedStyle(panel).display === 'none') {
+            return false;
+        }
+        return Boolean(img.getAttribute('src'));
+    });
+}
+
+function waitForImageReady(img, timeoutMs = 2500) {
+    if (!img?.getAttribute('src') || img.complete) {
+        return Promise.resolve();
+    }
+
+    return new Promise((resolve) => {
+        let settled = false;
+        const finish = () => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            img.removeEventListener('load', finish);
+            img.removeEventListener('error', finish);
+            resolve();
+        };
+        img.addEventListener('load', finish);
+        img.addEventListener('error', finish);
+        if (img.complete) {
+            finish();
+            return;
+        }
+        window.setTimeout(finish, timeoutMs);
+    });
+}
+
+async function waitForVisibleMapsReady() {
+    await Promise.race([
+        Promise.all(getVisibleMapImages().map((img) => waitForImageReady(img))),
+        new Promise((resolve) => window.setTimeout(resolve, 2500)),
+    ]);
+}
+
+function pauseAnimationClock() {
+    if (animationInterval) {
+        clearInterval(animationInterval);
+        animationInterval = null;
+    }
+}
+
+function resumeAnimationIfNeeded(shouldResume) {
+    if (shouldResume && isPlaying) {
+        startAnimation();
+    }
 }
 
 function isInfoModalOpen() {
@@ -1387,35 +1493,45 @@ function getWrappedFrameIndex(index, frameCount) {
     return wrapped;
 }
 
-function collectDecodeWindowSourcesForAllStreams(centerFrame) {
-    const targetSources = new Set();
-    const domainIds = frameManifest?.domainOrder || Object.keys(framePairsCache);
-
-    domainIds.forEach(domainId => {
-        Object.keys(imageConfig).forEach(category => {
-            const framePairs = framePairsCache[domainId]?.[category] || [];
-            const frameCount = framePairs.length;
-            if (frameCount === 0) {
-                return;
-            }
-
-            for (let offset = -DECODE_WINDOW_RADIUS; offset <= DECODE_WINDOW_RADIUS; offset += 1) {
-                const frameIndex = getWrappedFrameIndex(centerFrame + offset, frameCount);
-                const framePair = framePairs[frameIndex - 1];
-                if (!framePair) {
-                    continue;
-                }
-
-                getFrameImagePaths(framePair).forEach((src) => targetSources.add(src));
+function collectFrameSources(domainId, category) {
+    const framePairs = framePairsCache[domainId]?.[category] || [];
+    const sources = [];
+    framePairs.forEach((framePair) => {
+        getFrameImagePaths(framePair).forEach((src) => {
+            if (src) {
+                sources.push(src);
             }
         });
     });
+    return sources;
+}
+
+function collectDecodeWindowSources(centerFrame) {
+    const targetSources = new Set();
+    const framePairs = getCurrentFramePairs();
+    const frameCount = framePairs.length;
+    if (frameCount === 0) {
+        return targetSources;
+    }
+
+    for (let offset = -DECODE_WINDOW_RADIUS; offset <= DECODE_WINDOW_RADIUS; offset += 1) {
+        const frameIndex = getWrappedFrameIndex(centerFrame + offset, frameCount);
+        const framePair = framePairs[frameIndex - 1];
+        if (!framePair) {
+            continue;
+        }
+        getFrameImagePaths(framePair).forEach((src) => {
+            if (src) {
+                targetSources.add(src);
+            }
+        });
+    }
 
     return targetSources;
 }
 
 function updateDecodeWindowsForAllStreams(centerFrame) {
-    const targetSources = collectDecodeWindowSourcesForAllStreams(centerFrame);
+    const targetSources = collectDecodeWindowSources(centerFrame);
 
     targetSources.forEach(src => {
         decodeImageSource(src);
@@ -1428,30 +1544,81 @@ function updateDecodeWindowsForAllStreams(centerFrame) {
     });
 }
 
-async function preloadAllFrames() {
-    const domainIds = Array.from(new Set(Object.values(domainHotkeys)));
-    const sources = [];
+async function preloadSources(sources, onProgress) {
+    const unique = [...new Set((sources || []).filter(Boolean))];
+    if (unique.length === 0) {
+        onProgress?.(0, 0);
+        return;
+    }
 
-    for (const domainId of domainIds) {
-        for (const category of Object.keys(imageConfig)) {
-            const framePairs = await loadCategoryFrames(domainId, category);
-            framePairs.forEach(framePair => {
-                sources.push(...getFrameImagePaths(framePair));
+    let completedCount = 0;
+    let nextIndex = 0;
+    onProgress?.(0, unique.length);
+
+    const worker = async () => {
+        while (nextIndex < unique.length) {
+            const src = unique[nextIndex];
+            nextIndex += 1;
+            await preloadImageSource(src);
+            completedCount += 1;
+            onProgress?.(completedCount, unique.length);
+        }
+    };
+
+    const workerCount = Math.min(PRELOAD_CONCURRENCY, unique.length);
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+}
+
+async function preloadCurrentSelection() {
+    const sources = collectFrameSources(currentDomain, currentCategory);
+    await preloadSources(sources, setLoadingProgress);
+    updateDecodeWindowsForAllStreams(currentFrame);
+}
+
+async function preloadRemainingInBackground() {
+    const domainIds = Array.from(new Set(Object.values(domainHotkeys)));
+    const categories = Object.keys(imageConfig);
+    const seen = new Set(collectFrameSources(currentDomain, currentCategory));
+    const prioritized = [];
+
+    const takeSources = async (domainId, category) => {
+        const framePairs = await loadCategoryFrames(domainId, category);
+        framePairs.forEach((framePair) => {
+            getFrameImagePaths(framePair).forEach((src) => {
+                if (!src || seen.has(src)) {
+                    return;
+                }
+                seen.add(src);
+                prioritized.push(src);
             });
+        });
+    };
+
+    for (const category of categories) {
+        if (category === currentCategory) {
+            continue;
+        }
+        await takeSources(currentDomain, category);
+    }
+    for (const domainId of domainIds) {
+        if (domainId === currentDomain) {
+            continue;
+        }
+        await takeSources(domainId, currentCategory);
+    }
+    for (const domainId of domainIds) {
+        if (domainId === currentDomain) {
+            continue;
+        }
+        for (const category of categories) {
+            if (category === currentCategory) {
+                continue;
+            }
+            await takeSources(domainId, category);
         }
     }
 
-    const uniqueSources = [...new Set(sources)];
-    let completedCount = 0;
-    setLoadingProgress(completedCount, uniqueSources.length);
-
-    await Promise.all(uniqueSources.map(async src => {
-        await preloadImageSource(src);
-        completedCount += 1;
-        setLoadingProgress(completedCount, uniqueSources.length);
-    }));
-
-    updateDecodeWindowsForAllStreams(currentFrame);
+    await preloadSources(prioritized);
 }
 
 function updateImages() {
@@ -1485,8 +1652,9 @@ function updateImages() {
             { panel: 'bottomRight', path: framePair.bottomRightPath, title: config.bottomRight?.title },
         ]
         : [
+            // Pair: GFS on top row, ICON on bottom row (single product column).
             { panel: 'topLeft', path: framePair.leftPath || framePair.topLeftPath, title: config.topLeft?.title || config.left?.title },
-            { panel: 'topRight', path: framePair.rightPath || framePair.topRightPath, title: config.topRight?.title || config.right?.title },
+            { panel: 'bottomLeft', path: framePair.rightPath || framePair.bottomLeftPath, title: config.bottomLeft?.title || config.right?.title },
         ];
 
     panelSpecs.forEach(({ panel, path, title }) => {
@@ -1505,7 +1673,7 @@ function updateImages() {
     });
 
     if (!quad) {
-        [bottomLeftImage, bottomRightImage].forEach((img) => {
+        [rightImage, bottomRightImage].forEach((img) => {
             if (!img) return;
             img.removeAttribute('src');
             img.classList.remove('error');
@@ -1570,6 +1738,14 @@ function getDomainGeoref(domainId = currentDomain) {
     return { extent, axesFraction };
 }
 
+function getMapDomainIds() {
+    const fromManifest = frameManifest?.domainOrder;
+    if (Array.isArray(fromManifest) && fromManifest.length > 0) {
+        return fromManifest;
+    }
+    return Array.from(new Set(Object.values(domainHotkeys)));
+}
+
 function isLonLatInDomain(lon, lat, domainId) {
     const georef = getDomainGeoref(domainId);
     if (!georef || !Number.isFinite(lon) || !Number.isFinite(lat)) {
@@ -1578,6 +1754,35 @@ function isLonLatInDomain(lon, lat, domainId) {
     const { extent } = georef;
     return lon >= extent.lonMin && lon <= extent.lonMax
         && lat >= extent.latMin && lat <= extent.latMax;
+}
+
+function preferredDomainForLonLat(lon, lat) {
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+        return null;
+    }
+    const domainIds = Array.from(new Set(Object.values(domainHotkeys)));
+    const containing = domainIds.filter((id) => isLonLatInDomain(lon, lat, id));
+    if (!containing.length) {
+        return null;
+    }
+    const regional = containing.filter((id) => id !== 'AU');
+    const candidates = regional.length ? regional : containing;
+    let bestId = candidates[0];
+    let bestDist = Infinity;
+    candidates.forEach((id) => {
+        const extent = getDomainGeoref(id)?.extent;
+        if (!extent) {
+            return;
+        }
+        const centerLon = (extent.lonMin + extent.lonMax) / 2;
+        const centerLat = (extent.latMin + extent.latMax) / 2;
+        const dist = ((centerLon - lon) ** 2) + ((centerLat - lat) ** 2);
+        if (dist < bestDist) {
+            bestDist = dist;
+            bestId = id;
+        }
+    });
+    return bestId;
 }
 
 function mapClickToLonLat(img, clientX, clientY) {
@@ -1717,6 +1922,9 @@ window.MapGeoref = {
     mapClickToLonLat,
     lonLatToImageOffsets,
     getDomainGeoref,
+    getDomainIds: getMapDomainIds,
+    isLonLatInDomain,
+    preferredDomainForLonLat,
 };
 
 function startAnimation() {
@@ -1762,16 +1970,23 @@ async function loadSelection(forceRefresh = false) {
     renderLegend();
 }
 
+async function loadSelectionCovered() {
+    const token = beginMapSwapLoading();
+    try {
+        await loadSelection();
+        await waitForVisibleMapsReady();
+    } finally {
+        endMapSwapLoading(token);
+    }
+}
+
 async function switchCategory(category) {
     if (category === currentCategory) {
         return;
     }
 
-    const wasPlaying = isPlaying;
-    if (wasPlaying && animationInterval) {
-        clearInterval(animationInterval);
-        animationInterval = null;
-    }
+    const shouldResume = isPlaying;
+    pauseAnimationClock();
 
     categoryButtons.forEach(btn => {
         btn.classList.toggle('active', btn.getAttribute('data-category') === category);
@@ -1781,11 +1996,11 @@ async function switchCategory(category) {
     if (mobileCategorySelect) mobileCategorySelect.value = category;
     clearAxisMaximize();
     syncImagePairLayout();
-    await loadSelection(true);
-    syncAxisMaximizeButtons();
-
-    if (wasPlaying) {
-        startAnimation();
+    try {
+        await loadSelectionCovered();
+        syncAxisMaximizeButtons();
+    } finally {
+        resumeAnimationIfNeeded(shouldResume);
     }
 }
 
@@ -1794,11 +2009,8 @@ async function switchDomain(domainId) {
         return;
     }
 
-    const wasPlaying = isPlaying;
-    if (wasPlaying && animationInterval) {
-        clearInterval(animationInterval);
-        animationInterval = null;
-    }
+    const shouldResume = isPlaying;
+    pauseAnimationClock();
 
     // Keep an open sounding when the pin still falls inside the destination domain;
     // otherwise drop it so we don't leave a stale off-map marker.
@@ -1812,16 +2024,16 @@ async function switchDomain(domainId) {
 
     currentDomain = domainId;
     if (mobileDomainSelect) mobileDomainSelect.value = domainId;
-    await loadSelection(true);
+    try {
+        await loadSelectionCovered();
 
-    if (keepSounding) {
-        requestAnimationFrame(() => {
-            window.SoundingViewer?.syncPin?.();
-        });
-    }
-
-    if (wasPlaying) {
-        startAnimation();
+        if (keepSounding) {
+            requestAnimationFrame(() => {
+                window.SoundingViewer?.syncPin?.();
+            });
+        }
+    } finally {
+        resumeAnimationIfNeeded(shouldResume);
     }
 }
 
@@ -1963,7 +2175,17 @@ function setupEventListeners() {
     document.addEventListener('keydown', function(event) {
         const target = event.target;
         const tagName = target?.tagName?.toLowerCase();
-        if (tagName === 'input' || tagName === 'select' || tagName === 'textarea' || target?.isContentEditable) {
+        const isProfileSelect = target?.id === 'sounding-location-select'
+            || target?.id === 'sounding-model-select';
+        // Profile selects stay focused after a choice and swallow letter keys.
+        // Release them so map / tool shortcuts work without an extra click.
+        if (isProfileSelect) {
+            target.blur();
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                return;
+            }
+        } else if (tagName === 'input' || tagName === 'select' || tagName === 'textarea' || target?.isContentEditable) {
             return;
         }
 
@@ -1977,11 +2199,15 @@ function setupEventListeners() {
             return;
         }
 
-        if (event.key === 'b' || event.key === 'B') {
-            if (window.SoundingViewer?.setToolEnabled && window.SoundingViewer?.isToolEnabled) {
-                window.SoundingViewer.setToolEnabled(!window.SoundingViewer.isToolEnabled());
-                event.preventDefault();
-            }
+        const profileToolHotkeys = {
+            s: 'sonde',
+            h: 'hodograph',
+            p: 'table',
+        };
+        const profileToolId = profileToolHotkeys[event.key.toLowerCase()];
+        if (profileToolId && window.SoundingViewer?.toggleTool) {
+            window.SoundingViewer.toggleTool(profileToolId);
+            event.preventDefault();
             return;
         }
 
@@ -2057,20 +2283,17 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(() => {
             updateImages();
             renderLegend();
+            return preloadCurrentSelection();
         })
         .catch(error => {
             console.warn('Failed to initialize category data:', error);
-        });
-});
-
-window.addEventListener('load', function() {
-    preloadAllFrames()
-        .catch(error => {
-            console.warn('Failed to preload one or more domain images:', error);
         })
         .finally(() => {
             hideLoadingOverlay();
             updateViewerBottomOffset();
+            preloadRemainingInBackground().catch(error => {
+                console.warn('Failed to preload remaining map images:', error);
+            });
         });
 });
 
@@ -2083,6 +2306,7 @@ window.addEventListener('resize', function() {
 
 window.AnimationController = {
     switchCategory,
+    switchDomain,
     startAnimation,
     stopAnimation,
     setFrame(frame) {
@@ -2095,5 +2319,7 @@ window.AnimationController = {
     getCurrentFrame: () => currentFrame,
     getCurrentCategory: () => currentCategory,
     getCurrentDomain: () => currentDomain,
+    getValidTime: () => getValidDateForFramePair(getCurrentFramePairs()[currentFrame - 1]),
+    clearAxisMaximize,
     isAnimationPlaying: () => isPlaying
 };

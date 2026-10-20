@@ -16,6 +16,31 @@
         },
     };
     const DEFAULT_SOUNDING_MODEL = 'gfs_seamless';
+    const MAP_LOCATION_VALUE = '__map__';
+    const AERODROME_CSV_URL = 'aerodrome_lat_long.csv';
+    const PROFILE_TOOLS = {
+        sonde: {
+            id: 'sonde',
+            buttonId: 'sounding-tool-btn',
+            label: 'Sounding',
+            title: 'Sounding (S)',
+            panelLabel: 'Sounding diagram',
+        },
+        hodograph: {
+            id: 'hodograph',
+            buttonId: 'hodograph-tool-btn',
+            label: 'Hodograph',
+            title: 'Hodograph (H)',
+            panelLabel: 'Hodograph',
+        },
+        table: {
+            id: 'table',
+            buttonId: 'profile-table-tool-btn',
+            label: 'Profile table',
+            title: 'Profile table (P)',
+            panelLabel: 'Profile table',
+        },
+    };
 
     const profileCache = new Map();
     const hourlyCache = new Map();
@@ -36,12 +61,23 @@
     let hoverEl;
     let closeBtn;
     let modelSelectEl;
-    let toolBtn;
+    let locationSelectEl;
+    let viewStackEl;
+    let tableWrapEl;
+    let tableBodyEl;
+    let toolButtons = {};
+    let activeTool = null;
+    let lastHodoLayout = null;
     let pinTargets = [];
     let resizeHandleEl;
     let workspaceEl;
     let pinLat = null;
     let pinLon = null;
+    let mapClickLat = null;
+    let mapClickLon = null;
+    let selectedIcao = null;
+    let aerodromes = [];
+    let aerodromesLoadPromise = null;
     let toolEnabled = false;
     let panelOpen = false;
     let selectedModelId = DEFAULT_SOUNDING_MODEL;
@@ -65,6 +101,8 @@
     let defaultViewExtents = null;
     let viewExtents = null;
     let viewSessionKey = null;
+    let hodoView = null;
+    let defaultHodoView = null;
     let isPanning = false;
     let panLastCss = null;
     let panPointerId = null;
@@ -88,7 +126,15 @@
         hoverEl = document.getElementById('sounding-hover');
         closeBtn = document.getElementById('sounding-close-btn');
         modelSelectEl = document.getElementById('sounding-model-select');
-        toolBtn = document.getElementById('sounding-tool-btn');
+        locationSelectEl = document.getElementById('sounding-location-select');
+        viewStackEl = document.getElementById('sounding-view-stack');
+        tableWrapEl = document.getElementById('sounding-table-wrap');
+        tableBodyEl = document.getElementById('sounding-profile-table-body');
+        toolButtons = {
+            sonde: document.getElementById('sounding-tool-btn'),
+            hodograph: document.getElementById('hodograph-tool-btn'),
+            table: document.getElementById('profile-table-tool-btn'),
+        };
         resizeHandleEl = document.getElementById('sounding-resize-handle');
         workspaceEl = document.querySelector('.map-workspace');
         pinTargets = [
@@ -117,13 +163,25 @@
             modelSelectEl.value = selectedModelId;
             modelSelectEl.addEventListener('change', () => {
                 setSelectedModel(modelSelectEl.value, { reload: panelOpen });
+                releaseProfileSelectFocus(modelSelectEl);
             });
         }
-        if (toolBtn) {
-            toolBtn.addEventListener('click', () => {
-                setToolEnabled(!toolEnabled);
+        if (locationSelectEl) {
+            locationSelectEl.addEventListener('change', () => {
+                handleLocationSelect(locationSelectEl.value);
+                releaseProfileSelectFocus(locationSelectEl);
             });
+            loadAerodromes();
         }
+        Object.keys(PROFILE_TOOLS).forEach((toolId) => {
+            const button = toolButtons[toolId];
+            if (!button) {
+                return;
+            }
+            button.addEventListener('click', () => {
+                toggleTool(toolId);
+            });
+        });
         bindResizeHandle();
         bindHoverInteractions();
         window.addEventListener('resize', () => {
@@ -131,7 +189,7 @@
             // Re-clamp only; avoid re-dispatching resize (script.js already handles maps).
             applyPanelSize(storedPanelSizePx, { persist: false, notify: false });
             if (lastProfile) {
-                renderSkewT(lastProfile);
+                renderActiveView(lastProfile);
             }
         });
     }
@@ -180,7 +238,7 @@
             window.dispatchEvent(new Event('resize'));
             syncPin();
             if (lastProfile) {
-                renderSkewT(lastProfile);
+                renderActiveView(lastProfile);
             }
         });
     }
@@ -286,26 +344,90 @@
         });
     }
 
-    function syncToolUi() {
-        document.body.classList.toggle('sounding-tool-active', toolEnabled);
-        if (toolBtn) {
-            toolBtn.classList.toggle('active', toolEnabled);
-            toolBtn.setAttribute('aria-pressed', toolEnabled ? 'true' : 'false');
-            toolBtn.title = toolEnabled ? 'Sounding tool on — click a map point' : 'Sounding tool';
+    function releaseProfileSelectFocus(selectEl) {
+        if (selectEl && document.activeElement === selectEl) {
+            selectEl.blur();
         }
     }
 
-    function setToolEnabled(enabled) {
-        ensureUi();
-        toolEnabled = Boolean(enabled);
-        syncToolUi();
-        if (!toolEnabled) {
-            close();
+    function syncToolUi() {
+        document.body.classList.toggle('sounding-tool-active', toolEnabled);
+        Object.keys(PROFILE_TOOLS).forEach((toolId) => {
+            const button = toolButtons[toolId];
+            const meta = PROFILE_TOOLS[toolId];
+            if (!button || !meta) {
+                return;
+            }
+            const active = activeTool === toolId;
+            button.classList.toggle('active', active);
+            button.setAttribute('aria-pressed', active ? 'true' : 'false');
+            button.title = meta.title;
+            button.setAttribute('aria-label', meta.title);
+        });
+        if (panelEl) {
+            panelEl.setAttribute('aria-label', PROFILE_TOOLS[activeTool]?.panelLabel || 'Profile panel');
         }
+        syncProfileViewMode();
+    }
+
+    function syncProfileViewMode() {
+        const showTable = activeTool === 'table';
+        canvasWrapEl?.classList.toggle('hidden', showTable);
+        tableWrapEl?.classList.toggle('hidden', !showTable);
+        if (showTable || activeTool === 'hodograph') {
+            endPanInteraction();
+        }
+        if (activeTool !== 'sonde' && activeTool !== 'hodograph') {
+            hideHoverReadout();
+        }
+        if (canvasEl) {
+            canvasEl.style.cursor = activeTool === 'hodograph' || activeTool === 'sonde' ? 'crosshair' : '';
+        }
+    }
+
+    function setActiveTool(toolId) {
+        ensureUi();
+        const next = PROFILE_TOOLS[toolId] ? toolId : null;
+        if (activeTool === next) {
+            return;
+        }
+        activeTool = next;
+        toolEnabled = Boolean(next);
+        hideHoverReadout();
+        syncToolUi();
+        if (panelOpen && lastProfile) {
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    renderActiveView(lastProfile, { preserveHover: false });
+                });
+            });
+        }
+    }
+
+    function toggleTool(toolId) {
+        if (activeTool === toolId) {
+            setActiveTool(null);
+            close();
+            return;
+        }
+        setActiveTool(toolId);
+    }
+
+    function setToolEnabled(enabled) {
+        if (enabled) {
+            setActiveTool(activeTool || 'sonde');
+            return;
+        }
+        setActiveTool(null);
+        close();
     }
 
     function isToolEnabled() {
         return toolEnabled;
+    }
+
+    function getActiveTool() {
+        return activeTool;
     }
 
     function normalizeModelId(modelId) {
@@ -356,12 +478,12 @@
     }
 
     function cacheKey(lat, lon, validTimeIso, modelId = selectedModelId) {
-        // v5: multi-model (GFS/ICON) profiles.
-        return `v5:${normalizeModelId(modelId)}:${lat.toFixed(3)},${lon.toFixed(3)},${validTimeIso}`;
+        // v7: include 10 m winds for surface hodograph / profile table rows.
+        return `v7:${normalizeModelId(modelId)}:${lat.toFixed(3)},${lon.toFixed(3)},${validTimeIso}`;
     }
 
     function hourlyCacheKey(lat, lon, dateText, modelId = selectedModelId) {
-        return `${normalizeModelId(modelId)}:${lat.toFixed(3)},${lon.toFixed(3)},${dateText}`;
+        return `v7:${normalizeModelId(modelId)}:${lat.toFixed(3)},${lon.toFixed(3)},${dateText}`;
     }
 
     function rememberProfile(key, profile) {
@@ -372,16 +494,60 @@
         }
     }
 
-    function rememberHourly(key, hourly, model) {
-        hourlyCache.set(key, { hourly, model });
+    function rememberHourly(key, hourly, model, elevationM = null) {
+        hourlyCache.set(key, { hourly, model, elevation: elevationM });
         if (hourlyCache.size > MAX_HOURLY_CACHE_ENTRIES) {
             const oldest = hourlyCache.keys().next().value;
             hourlyCache.delete(oldest);
         }
     }
 
+    function estimateSurfaceHeightAmslM(levels, surfacePressure, surfaceTempC, elevationM) {
+        // Open-Meteo geopotential heights are metres AMSL. Surface was previously stored as
+        // 0 m, which made the hover altitude AGL and pulled every near-surface interpolation
+        // down toward sea level. Prefer a hypsometric estimate from the lowest above-ground
+        // isobar so it stays consistent with the sounding; fall back to grid elevation.
+        const above = (levels || [])
+            .filter((level) => (
+                Number.isFinite(level.height)
+                && Number.isFinite(level.pressure)
+                && Number.isFinite(level.temperature)
+                && level.pressure < surfacePressure - 0.5
+            ))
+            .slice()
+            .sort((a, b) => b.pressure - a.pressure);
+        const nearest = above[0];
+        if (nearest && Number.isFinite(surfaceTempC)) {
+            const tMeanK = ((surfaceTempC + nearest.temperature) / 2) + 273.15;
+            const gasConstantDryAir = 287.05;
+            const gravity = 9.80665;
+            const heightM = nearest.height
+                + ((gasConstantDryAir * tMeanK) / gravity)
+                * Math.log(nearest.pressure / surfacePressure);
+            if (
+                Number.isFinite(heightM)
+                && heightM > -400
+                && heightM < 8000
+                && (!Number.isFinite(elevationM) || Math.abs(heightM - elevationM) < 600)
+            ) {
+                return heightM;
+            }
+        }
+        if (Number.isFinite(elevationM) && elevationM > -400 && elevationM < 8000) {
+            return elevationM;
+        }
+        return null;
+    }
+
     function buildHourlyVariableList() {
-        const vars = ['temperature_2m', 'dew_point_2m', 'relative_humidity_2m', 'surface_pressure'];
+        const vars = [
+            'temperature_2m',
+            'dew_point_2m',
+            'relative_humidity_2m',
+            'surface_pressure',
+            'wind_speed_10m',
+            'wind_direction_10m',
+        ];
         PRESSURE_LEVELS_HPA.forEach((level) => {
             vars.push(`temperature_${level}hPa`);
             vars.push(`dew_point_${level}hPa`);
@@ -442,7 +608,7 @@
         return new Date(text);
     }
 
-    function buildProfileFromHourly(hourly, model, lat, lon, validTime) {
+    function buildProfileFromHourly(hourly, model, lat, lon, validTime, elevationM = null) {
         if (!hourly?.time?.length) {
             throw new Error('No hourly profile data returned');
         }
@@ -474,14 +640,20 @@
         }
         if (Number.isFinite(surfacePressure) && Number.isFinite(surfaceTemp)) {
             // Drop isobaric points at/below ground — they cause near-surface zig-zags.
+            const surfaceHeightM = estimateSurfaceHeightAmslM(
+                levels,
+                surfacePressure,
+                surfaceTemp,
+                elevationM,
+            );
             const aboveGround = levels.filter((level) => level.pressure < surfacePressure - 0.5);
             aboveGround.push({
                 pressure: surfacePressure,
                 temperature: surfaceTemp,
                 dewpoint: Number.isFinite(surfaceDew) ? surfaceDew : null,
-                height: 0,
-                windSpeedKt: null,
-                windDirDeg: null,
+                height: surfaceHeightM,
+                windSpeedKt: hourly.wind_speed_10m?.[hourIndex] ?? null,
+                windDirDeg: hourly.wind_direction_10m?.[hourIndex] ?? null,
                 isSurface: true,
             });
             levels.length = 0;
@@ -497,6 +669,7 @@
             validTime: parseUtcHour(hourly.time[hourIndex]),
             latitude: lat,
             longitude: lon,
+            elevationM: Number.isFinite(elevationM) ? elevationM : null,
             levels,
             surfacePressure: Number.isFinite(surfacePressure) ? surfacePressure : null,
         };
@@ -538,14 +711,18 @@
             throw new Error(`No hourly ${modelMeta.label} profile data returned`);
         }
 
-        const entry = { hourly, model: payload.model || modelMeta.id };
-        rememberHourly(dayKey, entry.hourly, entry.model);
+        const entry = {
+            hourly,
+            model: payload.model || modelMeta.id,
+            elevation: Number.isFinite(payload.elevation) ? payload.elevation : null,
+        };
+        rememberHourly(dayKey, entry.hourly, entry.model, entry.elevation);
         return entry;
     }
 
     async function fetchOpenMeteoProfile(lat, lon, validTime, modelId = selectedModelId) {
-        const { hourly, model } = await fetchOpenMeteoHourly(lat, lon, validTime, modelId);
-        return buildProfileFromHourly(hourly, model, lat, lon, validTime);
+        const { hourly, model, elevation } = await fetchOpenMeteoHourly(lat, lon, validTime, modelId);
+        return buildProfileFromHourly(hourly, model, lat, lon, validTime, elevation);
     }
 
     // Thermodynamic constants for adiabat background curves (SI + hPa).
@@ -912,7 +1089,7 @@
         if (Number.isFinite(sample.heightM)) {
             const altitudeFt = Math.round(sample.heightM * 3.28084);
             if (altitudeFt >= -500 && altitudeFt <= 80000) {
-                altitudeText = `${altitudeFt.toLocaleString('en-US')} ft`;
+                altitudeText = `${altitudeFt.toLocaleString('en-US')} ft AMSL`;
             }
         }
 
@@ -940,8 +1117,8 @@
             hoverEl.innerHTML = '';
         }
         lastPointerCss = null;
-        // Restore the base sounding when the interactive parcel overlay clears.
-        if (canvasEl && staticLayerCanvas) {
+        // Restore the base sounding / hodograph when the interactive overlay clears.
+        if ((activeTool === 'sonde' || activeTool === 'hodograph') && canvasEl && staticLayerCanvas) {
             const ctx = canvasEl.getContext('2d');
             restoreStaticLayer(ctx);
             const dpr = window.devicePixelRatio || 1;
@@ -950,7 +1127,11 @@
     }
 
     function updateHoverReadout(clientX, clientY) {
-        if (!canvasEl || !lastPlot || !lastProfile?.levels?.length) {
+        if (activeTool === 'hodograph') {
+            updateHodographHover(clientX, clientY);
+            return;
+        }
+        if (activeTool !== 'sonde' || !canvasEl || !lastPlot || !lastProfile?.levels?.length) {
             hideHoverReadout();
             return;
         }
@@ -1038,16 +1219,20 @@
         );
     }
 
+    function isInsideHodograph(x, y, layout = lastHodoLayout) {
+        if (!layout) return false;
+        return Math.hypot(x - layout.cx, y - layout.cy) <= layout.radius + 2;
+    }
+
     function endPanInteraction() {
-        isPanning = false;
-        panLastCss = null;
-        panPointerId = null;
-        pendingPanDx = 0;
-        pendingPanDy = 0;
         if (panRaf) {
             cancelAnimationFrame(panRaf);
             panRaf = 0;
         }
+        flushPendingPan();
+        isPanning = false;
+        panLastCss = null;
+        panPointerId = null;
         canvasEl?.classList.remove('is-panning');
     }
 
@@ -1056,20 +1241,28 @@
         canvasEl.dataset.hoverBound = '1';
 
         canvasEl.addEventListener('wheel', (event) => {
-            if (!panelOpen || !lastProfile || !lastPlot) return;
+            if (!panelOpen || !lastProfile) return;
             const { x, y } = pointerCssPosition(event);
-            if (!isInsidePlot(x, y)) return;
-            event.preventDefault();
-            // Scroll up zooms in; scroll down zooms out, but never beyond the default extents.
             const factor = event.deltaY > 0 ? 1.06 : 1 / 1.06;
-            zoomViewAt(x, y, factor);
+            if (activeTool === 'sonde' && lastPlot && isInsidePlot(x, y)) {
+                event.preventDefault();
+                // Scroll up zooms in; scroll down zooms out, but never beyond the default extents.
+                zoomViewAt(x, y, factor);
+                return;
+            }
+            if (activeTool === 'hodograph' && lastHodoLayout && isInsideHodograph(x, y)) {
+                event.preventDefault();
+                zoomHodographAt(x, y, factor);
+            }
         }, { passive: false });
 
         canvasEl.addEventListener('pointerdown', (event) => {
-            if (!panelOpen || !lastProfile || !lastPlot) return;
+            if (!panelOpen || !lastProfile) return;
             if (event.button != null && event.button !== 0) return;
             const pos = pointerCssPosition(event);
-            if (!isInsidePlot(pos.x, pos.y)) return;
+            const canPanSonde = activeTool === 'sonde' && lastPlot && isInsidePlot(pos.x, pos.y);
+            const canPanHodo = activeTool === 'hodograph' && lastHodoLayout && isInsideHodograph(pos.x, pos.y);
+            if (!canPanSonde && !canPanHodo) return;
             panPointerId = event.pointerId;
             panLastCss = pos;
             isPanning = false;
@@ -1128,12 +1321,19 @@
         });
 
         canvasEl.addEventListener('dblclick', (event) => {
-            if (!panelOpen || !lastProfile || !lastPlot) return;
+            if (!panelOpen || !lastProfile) return;
             const { x, y } = pointerCssPosition(event);
-            if (!isInsidePlot(x, y)) return;
-            event.preventDefault();
-            viewExtents = null;
-            renderSkewT(lastProfile);
+            if (activeTool === 'sonde' && lastPlot && isInsidePlot(x, y)) {
+                event.preventDefault();
+                viewExtents = null;
+                renderSkewT(lastProfile);
+                return;
+            }
+            if (activeTool === 'hodograph' && lastHodoLayout && isInsideHodograph(x, y)) {
+                event.preventDefault();
+                hodoView = null;
+                renderHodograph(lastProfile);
+            }
         });
 
         canvasEl.addEventListener('pointerleave', () => {
@@ -1399,6 +1599,75 @@
         viewExtents = null;
         defaultViewExtents = null;
         viewSessionKey = null;
+        hodoView = null;
+        defaultHodoView = null;
+    }
+
+    function copyHodoView(view) {
+        if (!view) return null;
+        return {
+            u0: view.u0,
+            v0: view.v0,
+            half: view.half,
+        };
+    }
+
+    function clampHodoView(view, defaults) {
+        if (!defaults) return copyHodoView(view);
+        const defHalf = Math.max(defaults.half, 1e-6);
+        const minHalf = defHalf / VIEW_MAX_ZOOM;
+        let half = Number.isFinite(view?.half) ? view.half : defHalf;
+        if (!(half > 0) || half > defHalf) {
+            half = defHalf;
+        } else if (half < minHalf) {
+            half = minHalf;
+        }
+        let u0 = Number.isFinite(view?.u0) ? view.u0 : 0;
+        let v0 = Number.isFinite(view?.v0) ? view.v0 : 0;
+        // Keep the visible circle inside the original hodograph circle.
+        const maxShift = Math.max(defHalf - half, 0);
+        const shift = Math.hypot(u0, v0);
+        if (shift > maxShift && shift > 1e-9) {
+            const scale = maxShift / shift;
+            u0 *= scale;
+            v0 *= scale;
+        } else if (maxShift === 0) {
+            u0 = 0;
+            v0 = 0;
+        }
+        return { u0, v0, half };
+    }
+
+    function hodoScreenToUv(x, y, layout) {
+        const half = layout.half || layout.maxSpeed;
+        return {
+            u: layout.u0 + ((x - layout.cx) / layout.radius) * half,
+            v: layout.v0 + ((layout.cy - y) / layout.radius) * half,
+        };
+    }
+
+    function hodoUvToScreen(u, v, layout) {
+        const half = layout.half || layout.maxSpeed;
+        return {
+            x: layout.cx + ((u - layout.u0) / half) * layout.radius,
+            y: layout.cy - ((v - layout.v0) / half) * layout.radius,
+        };
+    }
+
+    function zoomHodographAt(cssX, cssY, factor) {
+        if (!lastHodoLayout || !defaultHodoView || !lastProfile) return;
+        const current = clampHodoView(hodoView || defaultHodoView, defaultHodoView);
+        const layout = { ...lastHodoLayout, ...current };
+        const { u, v } = hodoScreenToUv(cssX, cssY, layout);
+        const fracX = (cssX - layout.cx) / layout.radius;
+        const fracY = (layout.cy - cssY) / layout.radius;
+        const nextHalf = current.half * factor;
+        hodoView = clampHodoView({
+            u0: u - fracX * nextHalf,
+            v0: v - fracY * nextHalf,
+            half: nextHalf,
+        }, defaultHodoView);
+        renderHodograph(lastProfile, { preserveHover: false });
     }
 
     function clampViewToDefault(view, defaults) {
@@ -1503,32 +1772,48 @@
         renderSkewT(lastProfile, { preserveHover: false });
     }
 
+    function flushPendingPan() {
+        const dx = pendingPanDx;
+        const dy = pendingPanDy;
+        pendingPanDx = 0;
+        pendingPanDy = 0;
+        if (!lastProfile || (dx === 0 && dy === 0)) return;
+        if (activeTool === 'hodograph') {
+            if (!lastHodoLayout || !defaultHodoView) return;
+            const current = clampHodoView(hodoView || defaultHodoView, defaultHodoView);
+            const ktPerPx = current.half / Math.max(lastHodoLayout.radius, 1e-6);
+            hodoView = clampHodoView({
+                u0: current.u0 - dx * ktPerPx,
+                v0: current.v0 + dy * ktPerPx,
+                half: current.half,
+            }, defaultHodoView);
+            renderHodograph(lastProfile, { preserveHover: false });
+            return;
+        }
+        if (!lastPlot || !defaultViewExtents) return;
+        const current = clampViewToDefault(viewExtents || defaultViewExtents, defaultViewExtents);
+        const tPerPx = (current.tMax - current.tMin) / Math.max(lastPlot.innerW, 1e-6);
+        const logSpan = Math.log(current.pMax) - Math.log(current.pMin);
+        const logPPerPx = logSpan / Math.max(lastPlot.innerH, 1e-6);
+        // Drag right/down moves the content with the pointer.
+        const dT = -dx * tPerPx;
+        const dLogP = -dy * logPPerPx;
+        viewExtents = clampViewToDefault({
+            pMin: Math.exp(Math.log(current.pMin) + dLogP),
+            pMax: Math.exp(Math.log(current.pMax) + dLogP),
+            tMin: current.tMin + dT,
+            tMax: current.tMax + dT,
+        }, defaultViewExtents);
+        renderSkewT(lastProfile, { preserveHover: false });
+    }
+
     function panViewByPixels(dxCss, dyCss) {
         pendingPanDx += dxCss;
         pendingPanDy += dyCss;
         if (panRaf) return;
         panRaf = requestAnimationFrame(() => {
             panRaf = 0;
-            const dx = pendingPanDx;
-            const dy = pendingPanDy;
-            pendingPanDx = 0;
-            pendingPanDy = 0;
-            if (!lastPlot || !defaultViewExtents || !lastProfile) return;
-            if (dx === 0 && dy === 0) return;
-            const current = clampViewToDefault(viewExtents || defaultViewExtents, defaultViewExtents);
-            const tPerPx = (current.tMax - current.tMin) / Math.max(lastPlot.innerW, 1e-6);
-            const logSpan = Math.log(current.pMax) - Math.log(current.pMin);
-            const logPPerPx = logSpan / Math.max(lastPlot.innerH, 1e-6);
-            // Drag right/down moves the content with the pointer.
-            const dT = -dx * tPerPx;
-            const dLogP = -dy * logPPerPx;
-            viewExtents = clampViewToDefault({
-                pMin: Math.exp(Math.log(current.pMin) + dLogP),
-                pMax: Math.exp(Math.log(current.pMax) + dLogP),
-                tMin: current.tMin + dT,
-                tMax: current.tMax + dT,
-            }, defaultViewExtents);
-            renderSkewT(lastProfile, { preserveHover: false });
+            flushPendingPan();
         });
     }
 
@@ -1724,10 +2009,353 @@
         }
     }
 
+    function windComponentsKt(speedKt, dirDeg) {
+        if (!Number.isFinite(speedKt) || speedKt < 0 || !Number.isFinite(dirDeg)) {
+            return null;
+        }
+        const rad = (dirDeg * Math.PI) / 180;
+        return {
+            u: -speedKt * Math.sin(rad),
+            v: -speedKt * Math.cos(rad),
+        };
+    }
+
+    function profileWindPoints(profile) {
+        return (profile?.levels || [])
+            .map((level) => {
+                const uv = windComponentsKt(level.windSpeedKt, level.windDirDeg);
+                if (!uv) {
+                    return null;
+                }
+                return { ...level, u: uv.u, v: uv.v };
+            })
+            .filter(Boolean)
+            .sort((a, b) => b.pressure - a.pressure);
+    }
+
+    function formatMissing(value, digits = 0) {
+        if (!Number.isFinite(value)) {
+            return '—';
+        }
+        return value.toFixed(digits);
+    }
+
+    function formatWindDir(dirDeg) {
+        if (!Number.isFinite(dirDeg) || dirDeg < 0 || dirDeg > 360) {
+            return '—';
+        }
+        const rounded = Math.round(dirDeg) % 360;
+        const display = rounded === 0 ? 360 : rounded;
+        return String(display).padStart(3, '0');
+    }
+
+    function formatAltitudeFt(heightM) {
+        if (!Number.isFinite(heightM)) {
+            return '—';
+        }
+        const altitudeFt = Math.round(heightM * 3.28084);
+        if (altitudeFt < -500 || altitudeFt > 80000) {
+            return '—';
+        }
+        return altitudeFt.toLocaleString('en-US');
+    }
+
+    function pressureColor(pressure, pMin = 100, pMax = 1000) {
+        const safeP = Math.min(Math.max(pressure, pMin), pMax);
+        const t = (Math.log(safeP) - Math.log(pMin)) / (Math.log(pMax) - Math.log(pMin));
+        const r = Math.round(29 + (214 - 29) * t);
+        const g = Math.round(111 + (40 - 111) * t);
+        const b = Math.round(216 + (40 - 216) * t);
+        return `rgb(${r}, ${g}, ${b})`;
+    }
+
+    function hodographLabelForLevel(level) {
+        if (level.isSurface) {
+            return 'Sfc';
+        }
+        const labeled = [850, 700, 500, 300, 250, 200, 100];
+        const match = labeled.find((hPa) => Math.abs(level.pressure - hPa) < 8);
+        return match ? String(match) : null;
+    }
+
+    function renderProfileTable(profile) {
+        if (!tableBodyEl) {
+            return;
+        }
+        const levels = [...(profile?.levels || [])].sort((a, b) => a.pressure - b.pressure);
+        tableBodyEl.innerHTML = levels.map((level) => {
+            const rowClass = level.isSurface ? ' class="is-surface"' : '';
+            return (
+                `<tr${rowClass}>`
+                + `<td>${formatMissing(level.pressure, 0)}</td>`
+                + `<td>${formatAltitudeFt(level.height)}</td>`
+                + `<td>${formatWindDir(level.windDirDeg)}</td>`
+                + `<td>${formatMissing(level.windSpeedKt, 0)}</td>`
+                + `<td>${formatMissing(level.temperature, 1)}</td>`
+                + `<td>${formatMissing(level.dewpoint, 1)}</td>`
+                + '</tr>'
+            );
+        }).join('');
+    }
+
+    function renderHodograph(profile, { preserveHover = false } = {}) {
+        ensureUi();
+        if (!canvasEl || !profile?.levels?.length) return;
+        lastProfile = profile;
+        lastPlot = null;
+        if (!preserveHover) {
+            lastPointerCss = null;
+            if (hoverEl) {
+                hoverEl.classList.add('hidden');
+                hoverEl.innerHTML = '';
+            }
+        }
+
+        const width = canvasEl.clientWidth || 640;
+        const height = canvasEl.clientHeight || 520;
+        if (width < 8 || height < 8) {
+            return;
+        }
+        const dpr = window.devicePixelRatio || 1;
+        canvasEl.width = Math.floor(width * dpr);
+        canvasEl.height = Math.floor(height * dpr);
+
+        const ctx = canvasEl.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        const pad = 36;
+        const innerW = Math.max(width - pad * 2, 40);
+        const innerH = Math.max(height - pad * 2, 40);
+        const cx = pad + innerW / 2;
+        const cy = pad + innerH / 2;
+        const radius = Math.max(Math.min(innerW, innerH) / 2 - 6, 20);
+        const points = profileWindPoints(profile);
+        const maxObserved = points.reduce((max, point) => Math.max(max, Math.hypot(point.u, point.v)), 0);
+        const maxSpeed = Math.max(40, Math.ceil((maxObserved + 5) / 10) * 10);
+        const sessionKey = makeViewSessionKey(profile);
+        if (sessionKey !== viewSessionKey) {
+            viewSessionKey = sessionKey;
+            viewExtents = null;
+            hodoView = null;
+        }
+        defaultHodoView = { u0: 0, v0: 0, half: maxSpeed };
+        const view = clampHodoView(hodoView || defaultHodoView, defaultHodoView);
+        hodoView = view;
+        lastHodoLayout = {
+            cx,
+            cy,
+            radius,
+            maxSpeed,
+            u0: view.u0,
+            v0: view.v0,
+            half: view.half,
+            points,
+        };
+
+        ctx.fillStyle = '#f4f7fb';
+        ctx.fillRect(0, 0, width, height);
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.clip();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+
+        const origin = hodoUvToScreen(0, 0, lastHodoLayout);
+        const ktToPx = radius / view.half;
+        ctx.strokeStyle = 'rgba(90, 110, 140, 0.22)';
+        ctx.lineWidth = 1;
+        for (let kt = 10; kt <= maxSpeed; kt += 10) {
+            ctx.beginPath();
+            ctx.arc(origin.x, origin.y, kt * ktToPx, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        ctx.beginPath();
+        ctx.moveTo(origin.x - maxSpeed * ktToPx, origin.y);
+        ctx.lineTo(origin.x + maxSpeed * ktToPx, origin.y);
+        ctx.moveTo(origin.x, origin.y - maxSpeed * ktToPx);
+        ctx.lineTo(origin.x, origin.y + maxSpeed * ktToPx);
+        ctx.strokeStyle = 'rgba(90, 110, 140, 0.45)';
+        ctx.stroke();
+
+        const toX = (u) => hodoUvToScreen(u, 0, lastHodoLayout).x;
+        const toY = (v) => hodoUvToScreen(0, v, lastHodoLayout).y;
+
+        if (points.length) {
+            ctx.beginPath();
+            points.forEach((point, index) => {
+                const x = toX(point.u);
+                const y = toY(point.v);
+                if (index === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            });
+            ctx.strokeStyle = 'rgba(40, 60, 90, 0.55)';
+            ctx.lineWidth = 1.6;
+            ctx.stroke();
+
+            points.forEach((point) => {
+                const x = toX(point.u);
+                const y = toY(point.v);
+                ctx.beginPath();
+                ctx.arc(x, y, point.isSurface ? 4.2 : 3.2, 0, Math.PI * 2);
+                ctx.fillStyle = pressureColor(point.pressure);
+                ctx.fill();
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+
+                const label = hodographLabelForLevel(point);
+                if (label) {
+                    ctx.fillStyle = '#1f2a37';
+                    ctx.font = point.isSurface ? 'bold 11px sans-serif' : '10px sans-serif';
+                    ctx.textAlign = x >= cx ? 'left' : 'right';
+                    ctx.textBaseline = 'bottom';
+                    ctx.fillText(label, x + (x >= cx ? 6 : -6), y - 4);
+                }
+            });
+        } else {
+            ctx.fillStyle = '#5b6b7c';
+            ctx.font = '12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('No wind data', cx, cy);
+        }
+
+        ctx.restore();
+
+        ctx.fillStyle = '#5b6b7c';
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText('N', cx, cy - radius - 6);
+        ctx.textBaseline = 'top';
+        ctx.fillText('S', cx, cy + radius + 6);
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('E', cx + radius + 6, cy);
+        ctx.textAlign = 'right';
+        ctx.fillText('W', cx - radius - 6, cy);
+
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'bottom';
+        ctx.fillStyle = 'rgba(91, 107, 124, 0.9)';
+        ctx.font = '10px sans-serif';
+        for (let kt = 20; kt <= maxSpeed; kt += 20) {
+            const label = hodoUvToScreen(kt, 0, lastHodoLayout);
+            if (Math.hypot(label.x - cx, label.y - cy) <= radius - 2) {
+                ctx.fillText(`${kt} kt`, label.x + 3, label.y - 3);
+            }
+        }
+
+        captureStaticLayer();
+        if (preserveHover && lastPointerCss) {
+            const rect = canvasEl.getBoundingClientRect();
+            updateHodographHover(rect.left + lastPointerCss.x, rect.top + lastPointerCss.y);
+        }
+    }
+
+    function updateHodographHover(clientX, clientY) {
+        if (!canvasEl || !lastHodoLayout || !lastProfile?.levels?.length) {
+            hideHoverReadout();
+            return;
+        }
+        const { cx, cy, radius, points } = lastHodoLayout;
+        if (!points?.length) {
+            hideHoverReadout();
+            return;
+        }
+
+        const rect = canvasEl.getBoundingClientRect();
+        const x = clientX - rect.left;
+        const y = clientY - rect.top;
+        lastPointerCss = { x, y };
+        if (Math.hypot(x - cx, y - cy) > radius + 14) {
+            hideHoverReadout();
+            return;
+        }
+
+        let best = null;
+        let bestDist = Infinity;
+        points.forEach((point) => {
+            const screen = hodoUvToScreen(point.u, point.v, lastHodoLayout);
+            const dist = Math.hypot(screen.x - x, screen.y - y);
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = point;
+            }
+        });
+        if (!best || bestDist > 16) {
+            hideHoverReadout();
+            return;
+        }
+
+        const ctx = canvasEl.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        if (restoreStaticLayer(ctx)) {
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            const highlighted = hodoUvToScreen(best.u, best.v, lastHodoLayout);
+            const hx = highlighted.x;
+            const hy = highlighted.y;
+            ctx.beginPath();
+            ctx.arc(hx, hy, 6.5, 0, Math.PI * 2);
+            ctx.strokeStyle = '#1f2a37';
+            ctx.lineWidth = 1.6;
+            ctx.stroke();
+        }
+
+        if (hoverEl) {
+            hoverEl.innerHTML = formatHoverReadout({
+                pressure: best.pressure,
+                temperature: best.temperature,
+                heightM: best.height,
+                windDirDeg: best.windDirDeg,
+                windSpeedKt: best.windSpeedKt,
+            });
+            hoverEl.classList.remove('hidden');
+            const tipW = hoverEl.offsetWidth || 160;
+            const tipH = hoverEl.offsetHeight || 72;
+            let left = x + 12;
+            let top = y + 12;
+            if (left + tipW > rect.width - 4) left = x - tipW - 12;
+            if (top + tipH > rect.height - 4) top = y - tipH - 12;
+            left = Math.max(4, Math.min(left, rect.width - tipW - 4));
+            top = Math.max(4, Math.min(top, rect.height - tipH - 4));
+            hoverEl.style.left = `${left}px`;
+            hoverEl.style.top = `${top}px`;
+        }
+    }
+
+    function renderActiveView(profile, options = {}) {
+        ensureUi();
+        if (profile?.levels?.length) {
+            lastProfile = profile;
+            renderProfileTable(profile);
+        }
+        if (activeTool === 'table') {
+            lastPlot = null;
+            lastHodoLayout = null;
+            hideHoverReadout();
+            return;
+        }
+        if (activeTool === 'hodograph') {
+            renderHodograph(profile, options);
+            return;
+        }
+        lastHodoLayout = null;
+        renderSkewT(profile, options);
+    }
+
     function renderSkewT(profile, { preserveHover = false } = {}) {
         ensureUi();
         if (!canvasEl || !profile?.levels?.length) return;
         lastProfile = profile;
+        lastHodoLayout = null;
         if (!preserveHover) {
             lastPointerCss = null;
             if (hoverEl) {
@@ -1874,12 +2502,169 @@
         return `${Math.abs(lat).toFixed(2)}°${latHem}, ${Math.abs(lon).toFixed(2)}°${lonHem}`;
     }
 
+    function parseAerodromeCsv(text) {
+        const lines = String(text || '').trim().split(/\r?\n/);
+        if (lines.length < 2) {
+            return [];
+        }
+        const header = lines[0].split(',').map((part) => part.trim().toUpperCase());
+        const icaoIndex = header.indexOf('ICAO');
+        const latIndex = header.indexOf('LAT');
+        const lonIndex = header.indexOf('LONG');
+        if (icaoIndex < 0 || latIndex < 0 || lonIndex < 0) {
+            return [];
+        }
+
+        const sites = [];
+        lines.slice(1).forEach((line) => {
+            if (!line.trim()) {
+                return;
+            }
+            const cols = line.split(',');
+            const icao = String(cols[icaoIndex] || '').trim().toUpperCase();
+            const lat = Number(cols[latIndex]);
+            const lon = Number(cols[lonIndex]);
+            if (!icao || !Number.isFinite(lat) || !Number.isFinite(lon)) {
+                return;
+            }
+            sites.push({ icao, lat, lon });
+        });
+        sites.sort((a, b) => a.icao.localeCompare(b.icao));
+        return sites;
+    }
+
+    function isSiteInAnyMapDomain(site) {
+        const domainIds = window.MapGeoref?.getDomainIds?.() || [];
+        return domainIds.some((domainId) => window.MapGeoref?.isLonLatInDomain?.(site.lon, site.lat, domainId));
+    }
+
+    function visibleAerodromes() {
+        return aerodromes.filter(isSiteInAnyMapDomain);
+    }
+
+    function populateLocationSelect() {
+        if (!locationSelectEl) {
+            return;
+        }
+        const sites = visibleAerodromes();
+        const currentValue = selectedIcao || MAP_LOCATION_VALUE;
+        locationSelectEl.innerHTML = '';
+
+        const mapOption = document.createElement('option');
+        mapOption.value = MAP_LOCATION_VALUE;
+        mapOption.textContent = 'Map point';
+        locationSelectEl.appendChild(mapOption);
+
+        sites.forEach((site) => {
+            const option = document.createElement('option');
+            option.value = site.icao;
+            option.textContent = site.icao;
+            locationSelectEl.appendChild(option);
+        });
+
+        const hasCurrent = [...locationSelectEl.options].some((option) => option.value === currentValue);
+        if (!hasCurrent && selectedIcao) {
+            selectedIcao = null;
+        }
+        locationSelectEl.value = hasCurrent ? currentValue : MAP_LOCATION_VALUE;
+    }
+
+    async function loadAerodromes() {
+        if (aerodromesLoadPromise) {
+            return aerodromesLoadPromise;
+        }
+        aerodromesLoadPromise = (async () => {
+            const response = await fetch(AERODROME_CSV_URL);
+            if (!response.ok) {
+                throw new Error(`Unable to read aerodrome list (${response.status})`);
+            }
+            aerodromes = parseAerodromeCsv(await response.text());
+            populateLocationSelect();
+        })().catch((error) => {
+            console.warn('Failed to load TAF/PCA locations:', error);
+            aerodromes = [];
+            populateLocationSelect();
+        });
+        return aerodromesLoadPromise;
+    }
+
+    function currentValidTime() {
+        if (lastRequestedValidTime instanceof Date && !Number.isNaN(lastRequestedValidTime.getTime())) {
+            return lastRequestedValidTime;
+        }
+        const fromMaps = window.AnimationController?.getValidTime?.();
+        return fromMaps instanceof Date && !Number.isNaN(fromMaps.getTime()) ? fromMaps : null;
+    }
+
+    function resetSoundingLocationState() {
+        lastValidTimeIso = null;
+        lastProfile = null;
+        lockedAxes = null;
+        resetViewExtents();
+    }
+
+    async function ensurePointVisibleOnMaps(lat, lon) {
+        const current = window.AnimationController?.getCurrentDomain?.();
+        if (window.MapGeoref?.isLonLatInDomain?.(lon, lat, current)) {
+            return;
+        }
+
+        window.AnimationController?.clearAxisMaximize?.();
+        if (
+            current !== 'AU'
+            && window.MapGeoref?.isLonLatInDomain?.(lon, lat, 'AU')
+            && typeof window.AnimationController?.switchDomain === 'function'
+        ) {
+            await window.AnimationController.switchDomain('AU');
+            return;
+        }
+
+        const dest = window.MapGeoref?.preferredDomainForLonLat?.(lon, lat);
+        if (dest && dest !== current && typeof window.AnimationController?.switchDomain === 'function') {
+            await window.AnimationController.switchDomain(dest);
+        }
+    }
+
+    async function moveSoundingTo(lat, lon) {
+        pinLat = lat;
+        pinLon = lon;
+        resetSoundingLocationState();
+        await ensurePointVisibleOnMaps(lat, lon);
+        syncPin();
+        const validTime = currentValidTime();
+        if (validTime) {
+            await loadProfileForPin(validTime, { showLoading: true });
+        }
+    }
+
+    async function handleLocationSelect(value) {
+        if (value === MAP_LOCATION_VALUE) {
+            if (!Number.isFinite(mapClickLat) || !Number.isFinite(mapClickLon)) {
+                if (locationSelectEl) {
+                    locationSelectEl.value = selectedIcao || MAP_LOCATION_VALUE;
+                }
+                return;
+            }
+            selectedIcao = null;
+            await moveSoundingTo(mapClickLat, mapClickLon);
+            return;
+        }
+
+        const site = aerodromes.find((entry) => entry.icao === value);
+        if (!site) {
+            return;
+        }
+        selectedIcao = site.icao;
+        await moveSoundingTo(site.lat, site.lon);
+    }
+
     function setSoundingLoading(visible) {
         ensureUi();
         if (loadingEl) {
             loadingEl.classList.toggle('hidden', !visible);
             loadingEl.setAttribute('aria-hidden', visible ? 'false' : 'true');
         }
+        viewStackEl?.classList.toggle('is-loading', Boolean(visible));
         canvasWrapEl?.classList.toggle('is-loading', Boolean(visible));
     }
 
@@ -1899,6 +2684,8 @@
             validTimeIso === lastValidTimeIso
             && lastProfile
             && lastProfile.model === modelMeta.id
+            && Math.abs((lastProfile.latitude ?? pinLat) - pinLat) < 1e-4
+            && Math.abs((lastProfile.longitude ?? pinLon) - pinLon) < 1e-4
         ) {
             setSoundingLoading(false);
             return;
@@ -1923,10 +2710,10 @@
 
         const key = cacheKey(pinLat, pinLon, validTimeIso, modelMeta.id);
         try {
-            const { hourly, model } = await fetchOpenMeteoHourly(pinLat, pinLon, validTime, modelMeta.id);
+            const { hourly, model, elevation } = await fetchOpenMeteoHourly(pinLat, pinLon, validTime, modelMeta.id);
             let profile = profileCache.get(key);
             if (!profile) {
-                profile = buildProfileFromHourly(hourly, model, pinLat, pinLon, validTime);
+                profile = buildProfileFromHourly(hourly, model, pinLat, pinLon, validTime, elevation);
                 rememberProfile(key, profile);
             }
 
@@ -1938,15 +2725,12 @@
             // Lock / expand axes from the full day at this pin so animation stays stable.
             updateLockedAxesFromHourly(hourly, pinLat, pinLon, modelMeta.id);
 
-            metaEl.textContent = (
-                `${formatLatLon(pinLat, pinLon)} · Valid ${profile.validTime.toISOString().replace('.000Z', 'Z')} · `
-                + `${profile.source}`
-            );
+            metaEl.textContent = formatLatLon(pinLat, pinLon);
             if (statusEl) {
                 statusEl.textContent = '';
                 statusEl.classList.remove('error');
             }
-            renderSkewT(profile);
+            renderActiveView(profile);
             setSoundingLoading(false);
         } catch (error) {
             if (generation !== loadGeneration) {
@@ -1954,9 +2738,13 @@
             }
             console.warn('Sounding fetch failed:', error);
             lastProfile = null;
+            lastHodoLayout = null;
             setSoundingLoading(false);
+            if (tableBodyEl) {
+                tableBodyEl.innerHTML = '';
+            }
             if (statusEl) {
-                statusEl.textContent = error?.message || 'Unable to load sounding';
+                statusEl.textContent = error?.message || 'Unable to load profile';
                 statusEl.classList.add('error');
             }
             const ctx = canvasEl?.getContext('2d');
@@ -1972,6 +2760,12 @@
 
         pinLat = lat;
         pinLon = lon;
+        mapClickLat = lat;
+        mapClickLon = lon;
+        selectedIcao = null;
+        if (locationSelectEl) {
+            locationSelectEl.value = MAP_LOCATION_VALUE;
+        }
         lastValidTimeIso = null;
         lockedAxes = null;
         resetViewExtents();
@@ -2022,6 +2816,7 @@
         pinLon = null;
         lastProfile = null;
         lastPlot = null;
+        lastHodoLayout = null;
         lastValidTimeIso = null;
         lastRequestedValidTime = null;
         lockedAxes = null;
@@ -2029,10 +2824,13 @@
         endPanInteraction();
         setSoundingLoading(false);
         hideHoverReadout();
+        if (tableBodyEl) {
+            tableBodyEl.innerHTML = '';
+        }
         if (metaEl) {
             metaEl.textContent = toolEnabled
                 ? 'Click a map point to load a profile.'
-                : 'Enable the balloon tool, then click a map point.';
+                : 'Enable a profile tool, then click a map point.';
         }
         if (statusEl) {
             statusEl.textContent = '';
@@ -2061,9 +2859,12 @@
         getPinLocation,
         isToolEnabled,
         setToolEnabled,
+        toggleTool,
+        getActiveTool,
         renderSkewT,
         syncPin,
         syncToValidTime,
+        refreshLocationOptions: populateLocationSelect,
     };
 
     if (document.readyState === 'loading') {

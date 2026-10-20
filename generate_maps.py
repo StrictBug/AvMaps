@@ -66,8 +66,10 @@ DEFAULT_DOMAIN_IDS = tuple(DOMAIN_DEFINITIONS.keys())
 
 # BG stays a simple left/right pair. Other categories use a 2x2 grid:
 #   top-left / bottom-left = GFS products, top-right / bottom-right = ICON.
+# Quad table axes: rows = models (GFS, ICON), columns = products.
 CATEGORY_PANEL_DIRS = {
     'BG': {
+        # Pair stacked by model: GFS on top, ICON below (single product column).
         'layout': 'pair',
         'left': 'BG/US',
         'right': 'BG/ICON',
@@ -75,23 +77,23 @@ CATEGORY_PANEL_DIRS = {
     'TS': {
         'layout': 'quad',
         'topLeft': 'TS/Flash density',
-        'topRight': 'TS/Flash density ICON',
-        'bottomLeft': 'TS/Severe storm potential',
+        'topRight': 'TS/Severe storm potential',
+        'bottomLeft': 'TS/Flash density ICON',
         'bottomRight': 'TS/Severe storm potential ICON',
     },
     'Airmass': {
         'layout': 'quad',
         'topLeft': 'Airmass/FZL',
-        'topRight': 'Airmass/FZL ICON',
-        'bottomLeft': 'Airmass/Snow level',
+        'topRight': 'Airmass/Snow level',
+        'bottomLeft': 'Airmass/FZL ICON',
         'bottomRight': 'Airmass/Snow level ICON',
     },
     'Turb': {
         'layout': 'quad',
-        'topLeft': 'Turb/MTW',
-        'topRight': 'Turb/MTW ICON',
-        'bottomLeft': 'Turb/Wind',
-        'bottomRight': 'Turb/Wind ICON',
+        'topLeft': 'Turb/Wind',
+        'topRight': 'Turb/MTW',
+        'bottomLeft': 'Turb/Wind ICON',
+        'bottomRight': 'Turb/MTW ICON',
     },
 }
 
@@ -330,21 +332,6 @@ LEGEND_CONFIG = {
     },
     'Turb': {
         'left': {
-            'title': 'MTW',
-            'fields': [
-                {
-                    'id': 'turb-mtw-intensity',
-                    'label': 'Mountain wave intensity',
-                    'units': 'm/s',
-                    'items': [
-                        {'color': '#ff9900', 'label': '0.2-0.4'},
-                        {'color': '#ff0000', 'label': '0.4-0.6'},
-                        {'color': '#ff00ff', 'label': '0.6+'},
-                    ],
-                },
-            ],
-        },
-        'right': {
             'title': 'Wind',
             'fields': [
                 {
@@ -367,6 +354,21 @@ LEGEND_CONFIG = {
                         {'color': '#ffcc00', 'label': 'MOD'},
                         {'color': '#ff6600', 'label': 'SEV'},
                         {'color': '#ff0000', 'label': 'EXT'},
+                    ],
+                },
+            ],
+        },
+        'right': {
+            'title': 'MTW',
+            'fields': [
+                {
+                    'id': 'turb-mtw-intensity',
+                    'label': 'Mountain wave intensity',
+                    'units': 'm/s',
+                    'items': [
+                        {'color': '#ff9900', 'label': '0.2-0.4'},
+                        {'color': '#ff0000', 'label': '0.4-0.6'},
+                        {'color': '#ff00ff', 'label': '0.6+'},
                     ],
                 },
             ],
@@ -802,26 +804,27 @@ def pair_published_frames(left_frames, right_frames):
 
 
 def quad_published_frames(top_left_frames, top_right_frames, bottom_left_frames, bottom_right_frames):
-    """Build 2x2 frame entries keyed by GFS (left-column) hours.
+    """Build 2x2 frame entries for model rows × product columns.
 
-    ICON (right-column) paths are attached when present for that hour so the
-    UI can show a quad layout before ICON products exist for every step.
+    Hours are keyed by the GFS top-row intersection so ICON (bottom row) can
+    attach when available for that hour before every ICON product exists.
     """
     top_left_by_hour = {frame['hour']: frame['path'] for frame in top_left_frames}
     top_right_by_hour = {frame['hour']: frame['path'] for frame in top_right_frames}
     bottom_left_by_hour = {frame['hour']: frame['path'] for frame in bottom_left_frames}
     bottom_right_by_hour = {frame['hour']: frame['path'] for frame in bottom_right_frames}
 
-    hours = sorted(set(top_left_by_hour) & set(bottom_left_by_hour))
+    # Require both GFS product columns; ICON cells attach when present.
+    hours = sorted(set(top_left_by_hour) & set(top_right_by_hour))
     entries = []
     for hour in hours:
         entry = {
             'hour': hour,
             'topLeftPath': top_left_by_hour[hour],
-            'bottomLeftPath': bottom_left_by_hour[hour],
+            'topRightPath': top_right_by_hour[hour],
         }
-        if hour in top_right_by_hour:
-            entry['topRightPath'] = top_right_by_hour[hour]
+        if hour in bottom_left_by_hour:
+            entry['bottomLeftPath'] = bottom_left_by_hour[hour]
         if hour in bottom_right_by_hour:
             entry['bottomRightPath'] = bottom_right_by_hour[hour]
         entries.append(entry)
@@ -2240,14 +2243,15 @@ ICON_FIELD_SETS = {
         'need_flash_w': True,
     },
     'ts_severe': {
-        # SigHail + sfc→500 shear only need T/FI at 700 & 500, U/V at 500, CAPE, Psfc.
+        # SigHail + sfc→500 shear need T/FI at 700 & 500, U/V at 500;
+        # upper isotachs need U/V at 250. CAPE + Psfc for SigHail mixing ratio.
         'pressure_levels_hpa': [700, 500],
         'need_t': True,
         'need_fi': True,
         'fi_levels_hpa': [700, 500],
         'need_rh': False,
         'need_uv': True,
-        'uv_levels_hpa': [500],
+        'uv_levels_hpa': [500, 250],
         'need_ps': True,
         'need_cape': True,
         'need_rain_con': False,
@@ -2287,7 +2291,7 @@ ICON_FIELD_SETS = {
         'fi_levels_hpa': [700, 500],
         'need_rh': True,
         'need_uv': True,
-        'uv_levels_hpa': [500],
+        'uv_levels_hpa': [500, 250],
         'need_ps': True,
         'need_cape': True,
         'need_rain_con': True,
@@ -2897,28 +2901,37 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
 
     if ts_severe_profile:
         # Plot 250 hPa isotachs for severe storm potential context.
-        u_250 = get_isobaric_field(data['u-component_of_wind_isobaric'], 25000)
-        v_250 = get_isobaric_field(data['v-component_of_wind_isobaric'], 25000)
-        wind_250_kt = np.sqrt(u_250.values**2 + v_250.values**2) * 1.94384
-        isotach_masked = np.where(wind_250_kt >= 80.0, wind_250_kt, np.nan)
+        # Require a real 250 hPa UV level (do not silently nearest-neighbour to 500).
+        if (
+            'u-component_of_wind_isobaric' in data
+            and 'v-component_of_wind_isobaric' in data
+            and np.any(np.isclose(np.asarray(data['u-component_of_wind_isobaric'].isobaric.values, dtype=float), 25000.0))
+        ):
+            u_250 = get_isobaric_field(data['u-component_of_wind_isobaric'], 25000)
+            v_250 = get_isobaric_field(data['v-component_of_wind_isobaric'], 25000)
+            wind_250_kt = np.sqrt(u_250.values**2 + v_250.values**2) * 1.94384
+            isotach_masked = np.where(wind_250_kt >= 80.0, wind_250_kt, np.nan)
 
-        isotach_levels = [80, 100, 120, 140, 160, 180, 300]
-        isotach_colors = ['#000080', '#ffff00', '#ff6600', '#ff0000', '#800000', '#ff00ff']
-        isotach_cmap = ListedColormap(isotach_colors)
-        isotach_norm = BoundaryNorm(isotach_levels, isotach_cmap.N, clip=False)
+            isotach_levels = [80, 100, 120, 140, 160, 180, 300]
+            isotach_colors = ['#000080', '#ffff00', '#ff6600', '#ff0000', '#800000', '#ff00ff']
+            isotach_cmap = ListedColormap(isotach_colors)
+            isotach_norm = BoundaryNorm(isotach_levels, isotach_cmap.N, clip=False)
 
-        ax.contourf(
-            data.longitude,
-            data.latitude,
-            isotach_masked,
-            levels=isotach_levels,
-            cmap=isotach_cmap,
-            norm=isotach_norm,
-            alpha=0.5,
-            extend='max',
-            transform=ccrs.PlateCarree(),
-            zorder=6,
-        )
+            ax.contourf(
+                data.longitude,
+                data.latitude,
+                isotach_masked,
+                levels=isotach_levels,
+                cmap=isotach_cmap,
+                norm=isotach_norm,
+                alpha=0.5,
+                extend='max',
+                transform=ccrs.PlateCarree(),
+                zorder=6,
+            )
+            print(f'Upper isotachs (>=80 kt at 250 hPa): {np.sum(np.isfinite(isotach_masked))} grid points')
+        else:
+            print('Warning: 250 hPa winds missing; upper isotachs layer skipped.')
     
     if layer_profile == 'bg':
         # Plot thickness (1000-500 hPa)
@@ -4509,8 +4522,8 @@ def generate_icon_turb_frames(forecast_hours, **kwargs):
         forecast_hours,
         field_set='turb_bundle',
         panels=[
-            {'category': 'Turb', 'panel_name': 'MTW ICON', 'layer_profile': 'turb_mtw'},
             {'category': 'Turb', 'panel_name': 'Wind ICON', 'layer_profile': 'turb_wind'},
+            {'category': 'Turb', 'panel_name': 'MTW ICON', 'layer_profile': 'turb_mtw'},
         ],
         **kwargs,
     )
