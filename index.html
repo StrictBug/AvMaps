@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Aviation map viewer</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="styles.css?v=col-hodo-1">
+    <link rel="stylesheet" href="styles.css?v=hodo-legend-fit-5">
 </head>
 <body class="loading">
     <header>
@@ -133,6 +133,70 @@
                         <div class="sounding-canvas-wrap">
                             <canvas id="sounding-canvas" class="sounding-canvas" width="480" height="640"></canvas>
                             <div id="sounding-hover" class="sounding-hover hidden" aria-live="polite"></div>
+                            <ul id="hodograph-bunkers-legend" class="hodograph-bunkers-legend hidden" aria-label="Bunkers vector layers">
+                                <li>
+                                    <button type="button" data-bunkers-layer="steering" aria-pressed="false">
+                                        <span class="hodograph-legend-swatch" style="--swatch:#d62828"></span>
+                                        Steering (0–6 km)
+                                    </button>
+                                </li>
+                                <li>
+                                    <button type="button" data-bunkers-layer="shear" aria-pressed="false">
+                                        <span class="hodograph-legend-swatch" style="--swatch:#2a9d4a"></span>
+                                        Shear (0.5–6 km)
+                                    </button>
+                                </li>
+                                <li>
+                                    <button type="button" data-bunkers-layer="propagation" aria-pressed="false">
+                                        <span class="hodograph-legend-swatch" style="--swatch:#1d4ed8"></span>
+                                        Propagation
+                                    </button>
+                                </li>
+                                <li>
+                                    <button type="button" data-bunkers-layer="lm" aria-pressed="false">
+                                        <span class="hodograph-legend-swatch" style="--swatch:#c05621"></span>
+                                        LM SMV
+                                    </button>
+                                </li>
+                                <li>
+                                    <button type="button" data-bunkers-layer="rm" aria-pressed="false">
+                                        <span class="hodograph-legend-swatch" style="--swatch:#0d7377"></span>
+                                        RM SMV
+                                    </button>
+                                </li>
+                            </ul>
+                        </div>
+                        <div id="hodograph-readout" class="hodograph-readout hidden">
+                            <section class="hodograph-readout-section">
+                                <div class="hodograph-readout-title">
+                                    <h3>Indices</h3>
+                                    <button type="button" class="hodograph-help-btn" data-hodo-help="indices" aria-label="About indices" title="About indices">?</button>
+                                </div>
+                                <dl id="hodograph-indices" class="hodograph-indices"></dl>
+                            </section>
+                            <section class="hodograph-readout-section hodograph-mode-row hodograph-deferred">
+                                <div>
+                                    <div class="hodograph-readout-title">
+                                        <h3>Storm mode</h3>
+                                        <button type="button" class="hodograph-help-btn" data-hodo-help="mode" aria-label="About storm mode" title="About storm mode">?</button>
+                                    </div>
+                                    <p id="hodograph-storm-mode" class="hodograph-flag-single"></p>
+                                </div>
+                                <div>
+                                    <div class="hodograph-readout-title">
+                                        <h3>Storm movement</h3>
+                                        <button type="button" class="hodograph-help-btn" data-hodo-help="movement" aria-label="About storm movement" title="About storm movement">?</button>
+                                    </div>
+                                    <p id="hodograph-storm-movement" class="hodograph-flag-single"></p>
+                                </div>
+                            </section>
+                            <section class="hodograph-readout-section hodograph-deferred">
+                                <div class="hodograph-readout-title">
+                                    <h3>Severe phenomena</h3>
+                                    <button type="button" class="hodograph-help-btn" data-hodo-help="severe" aria-label="About severe phenomena" title="About severe phenomena">?</button>
+                                </div>
+                                <ul id="hodograph-severe" class="hodograph-flag-list"></ul>
+                            </section>
                         </div>
                         <div id="sounding-table-wrap" class="sounding-table-wrap hidden">
                             <div class="sounding-table-scroll">
@@ -212,6 +276,14 @@
         </div>
     </div>
 
+    <div class="info-overlay hidden" id="hodograph-help-overlay" aria-hidden="true">
+        <div class="info-card hodo-help-card" role="dialog" aria-modal="true" aria-labelledby="hodograph-help-title">
+            <button id="hodograph-help-close" class="info-close-btn" type="button" aria-label="Close help">×</button>
+            <h2 id="hodograph-help-title" class="info-title"></h2>
+            <div id="hodograph-help-body"></div>
+        </div>
+    </div>
+
     <div id="sounding-pin-top-left" class="sounding-pin hidden" aria-hidden="true"></div>
     <div id="sounding-pin-top-right" class="sounding-pin hidden" aria-hidden="true"></div>
     <div id="sounding-pin-bottom-left" class="sounding-pin hidden" aria-hidden="true"></div>
@@ -266,7 +338,7 @@
             </div>
         </div>
 
-    <script src="sounding.js?v=location-csv-1"></script>
-    <script src="script.js?v=col-hodo-1"></script>
+    <script src="sounding.js?v=hodo-clear-stale-2"></script>
+    <script src="script.js?v=hodo-help-1"></script>
 </body>
 </html>

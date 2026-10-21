@@ -65,6 +65,16 @@
     let viewStackEl;
     let tableWrapEl;
     let tableBodyEl;
+    let readoutEl;
+    let indicesEl;
+    let stormModeEl;
+    let stormMovementEl;
+    let severeEl;
+    let bunkersLegendEl;
+    let helpOverlayEl;
+    let helpTitleEl;
+    let helpBodyEl;
+    let helpCloseBtn;
     let toolButtons = {};
     let activeTool = null;
     let lastHodoLayout = null;
@@ -104,6 +114,13 @@
     let viewSessionKey = null;
     let hodoView = null;
     let defaultHodoView = null;
+    const bunkersOverlay = {
+        steering: false,
+        shear: false,
+        propagation: false,
+        lm: false,
+        rm: false,
+    };
     let isPanning = false;
     let panLastCss = null;
     let panPointerId = null;
@@ -131,6 +148,18 @@
         viewStackEl = document.getElementById('sounding-view-stack');
         tableWrapEl = document.getElementById('sounding-table-wrap');
         tableBodyEl = document.getElementById('sounding-profile-table-body');
+        readoutEl = document.getElementById('hodograph-readout');
+        indicesEl = document.getElementById('hodograph-indices');
+        stormModeEl = document.getElementById('hodograph-storm-mode');
+        stormMovementEl = document.getElementById('hodograph-storm-movement');
+        severeEl = document.getElementById('hodograph-severe');
+        bunkersLegendEl = document.getElementById('hodograph-bunkers-legend');
+        helpOverlayEl = document.getElementById('hodograph-help-overlay');
+        helpTitleEl = document.getElementById('hodograph-help-title');
+        helpBodyEl = document.getElementById('hodograph-help-body');
+        helpCloseBtn = document.getElementById('hodograph-help-close');
+        bindBunkersLegend();
+        bindHodographHelp();
         toolButtons = {
             sonde: document.getElementById('sounding-tool-btn'),
             hodograph: document.getElementById('hodograph-tool-btn'),
@@ -373,9 +402,13 @@
 
     function syncProfileViewMode() {
         const showTable = activeTool === 'table';
+        const showHodograph = activeTool === 'hodograph';
         canvasWrapEl?.classList.toggle('hidden', showTable);
         tableWrapEl?.classList.toggle('hidden', !showTable);
-        if (showTable || activeTool === 'hodograph') {
+        readoutEl?.classList.toggle('hidden', !showHodograph);
+        bunkersLegendEl?.classList.toggle('hidden', !showHodograph);
+        viewStackEl?.classList.toggle('is-hodograph', showHodograph);
+        if (showTable || showHodograph) {
             endPanInteraction();
         }
         if (activeTool !== 'sonde' && activeTool !== 'hodograph') {
@@ -467,6 +500,7 @@
         lastValidTimeIso = null;
         lastProfile = null;
         resetViewExtents();
+        clearDrawnProfile();
         if (
             reload
             && panelOpen
@@ -1120,7 +1154,13 @@
         }
         lastPointerCss = null;
         // Restore the base sounding / hodograph when the interactive overlay clears.
-        if ((activeTool === 'sonde' || activeTool === 'hodograph') && canvasEl && staticLayerCanvas) {
+        if (
+            lastProfile
+            && panelOpen
+            && (activeTool === 'sonde' || activeTool === 'hodograph')
+            && canvasEl
+            && staticLayerCanvas
+        ) {
             const ctx = canvasEl.getContext('2d');
             restoreStaticLayer(ctx);
             const dpr = window.devicePixelRatio || 1;
@@ -2115,13 +2155,1278 @@
         return `rgb(${r}, ${g}, ${b})`;
     }
 
-    function hodographLabelForLevel(level) {
-        if (level.isSurface) {
-            return 'Sfc';
+    const KT_TO_MS = 0.514444;
+    const BUNKERS_DEVIANT_MS = 7.5;
+    const BUNKERS_DEVIANT_KT = BUNKERS_DEVIANT_MS / KT_TO_MS;
+    const GRAVITY_MS2 = 9.80665;
+    const HODO_AGL_LABELS = [
+        { aglM: 1000, text: '1km' },
+        { aglM: 3000, text: '3km' },
+        { aglM: 6000, text: '6km' },
+    ];
+    const HODO_LABEL_SNAP_M = 200;
+
+    function profileSurfaceHeightM(profile) {
+        const surface = profile?.levels?.find((level) => level.isSurface);
+        if (Number.isFinite(surface?.height)) {
+            return surface.height;
         }
-        const labeled = [850, 700, 500, 300, 250, 200, 100];
-        const match = labeled.find((hPa) => Math.abs(level.pressure - hPa) < 8);
-        return match ? String(match) : null;
+        return Number.isFinite(profile?.elevationM) ? profile.elevationM : null;
+    }
+
+    function levelAglM(level, surfaceHeightM) {
+        if (level?.isSurface) {
+            return 10;
+        }
+        if (!Number.isFinite(level?.height) || !Number.isFinite(surfaceHeightM)) {
+            return null;
+        }
+        return level.height - surfaceHeightM;
+    }
+
+    function levelsWithAglUv(profile) {
+        const surfaceHeightM = profileSurfaceHeightM(profile);
+        return (profile?.levels || [])
+            .map((level) => {
+                const uv = windComponentsKt(level.windSpeedKt, level.windDirDeg);
+                const aglM = levelAglM(level, surfaceHeightM);
+                if (!uv || !Number.isFinite(aglM) || aglM < -80) {
+                    return null;
+                }
+                return { ...level, u: uv.u, v: uv.v, aglM: Math.max(aglM, 0) };
+            })
+            .filter(Boolean)
+            .sort((a, b) => a.aglM - b.aglM);
+    }
+
+    function interpolateUvAtAgl(levels, targetAgl) {
+        if (!levels?.length || !Number.isFinite(targetAgl)) {
+            return null;
+        }
+        const first = levels[0];
+        const last = levels[levels.length - 1];
+        if (targetAgl < first.aglM - 25) {
+            return { u: first.u, v: first.v, aglM: first.aglM, incomplete: true };
+        }
+        if (targetAgl <= first.aglM) {
+            return { u: first.u, v: first.v, aglM: first.aglM, incomplete: false };
+        }
+        if (targetAgl > last.aglM + 1) {
+            return { u: last.u, v: last.v, aglM: last.aglM, incomplete: true };
+        }
+        for (let i = 0; i < levels.length - 1; i += 1) {
+            const lower = levels[i];
+            const upper = levels[i + 1];
+            if (targetAgl < lower.aglM || targetAgl > upper.aglM) {
+                continue;
+            }
+            const span = Math.max(upper.aglM - lower.aglM, 1e-6);
+            const t = (targetAgl - lower.aglM) / span;
+            return {
+                u: lower.u + t * (upper.u - lower.u),
+                v: lower.v + t * (upper.v - lower.v),
+                aglM: targetAgl,
+                incomplete: false,
+            };
+        }
+        return { u: last.u, v: last.v, aglM: last.aglM, incomplete: true };
+    }
+
+    function windLayerPoints(levels, zBot, zTop) {
+        const bottom = interpolateUvAtAgl(levels, zBot);
+        const top = interpolateUvAtAgl(levels, zTop);
+        if (!bottom || !top || bottom.incomplete || top.incomplete) {
+            return null;
+        }
+        const points = [{ u: bottom.u, v: bottom.v, aglM: zBot }];
+        levels.forEach((level) => {
+            if (level.aglM > zBot + 0.5 && level.aglM < zTop - 0.5) {
+                points.push({ u: level.u, v: level.v, aglM: level.aglM });
+            }
+        });
+        points.push({ u: top.u, v: top.v, aglM: zTop });
+        return points.sort((a, b) => a.aglM - b.aglM);
+    }
+
+    function meanWindLayerKt(levels, zBot, zTop) {
+        const points = windLayerPoints(levels, zBot, zTop);
+        if (!points || points.length < 2) {
+            return null;
+        }
+        let uSum = 0;
+        let vSum = 0;
+        let dzSum = 0;
+        for (let i = 0; i < points.length - 1; i += 1) {
+            const dz = points[i + 1].aglM - points[i].aglM;
+            if (dz <= 0) {
+                continue;
+            }
+            uSum += 0.5 * (points[i].u + points[i + 1].u) * dz;
+            vSum += 0.5 * (points[i].v + points[i + 1].v) * dz;
+            dzSum += dz;
+        }
+        if (dzSum <= 0) {
+            return null;
+        }
+        return { u: uSum / dzSum, v: vSum / dzSum };
+    }
+
+    function bulkShearKt(bottom, top) {
+        if (!bottom || !top || bottom.incomplete || top.incomplete) {
+            return null;
+        }
+        return Math.hypot(top.u - bottom.u, top.v - bottom.v);
+    }
+
+    function bunkersStormMotion(levels) {
+        const surface = interpolateUvAtAgl(levels, 10);
+        const vLow = interpolateUvAtAgl(levels, 500);
+        const km6 = interpolateUvAtAgl(levels, 6000);
+        const mean = meanWindLayerKt(levels, 10, 6000);
+        const shearTail = (vLow && !vLow.incomplete) ? vLow : surface;
+        if (!surface || !km6 || !mean || !shearTail || surface.incomplete || km6.incomplete) {
+            return null;
+        }
+        const shearU = km6.u - shearTail.u;
+        const shearV = km6.v - shearTail.v;
+        const shearMag = Math.hypot(shearU, shearV);
+        if (shearMag < 0.25) {
+            return null;
+        }
+        // 90° to the right of the shear vector looking downshear.
+        const deviateU = BUNKERS_DEVIANT_KT * (shearV / shearMag);
+        const deviateV = BUNKERS_DEVIANT_KT * (-shearU / shearMag);
+        return {
+            rm: { u: mean.u + deviateU, v: mean.v + deviateV },
+            lm: { u: mean.u - deviateU, v: mean.v - deviateV },
+            mean,
+            shear: { u: shearU, v: shearV },
+            shearMag,
+            deviate: { u: deviateU, v: deviateV },
+            vLow: shearTail,
+            v6: km6,
+        };
+    }
+
+    function stormRelativeHelicity(levels, zBot, zTop, storm) {
+        if (!storm || !Number.isFinite(storm.u) || !Number.isFinite(storm.v)) {
+            return null;
+        }
+        const points = windLayerPoints(levels, zBot, zTop);
+        if (!points || points.length < 2) {
+            return null;
+        }
+        const cu = storm.u * KT_TO_MS;
+        const cv = storm.v * KT_TO_MS;
+        let srh = 0;
+        for (let i = 0; i < points.length - 1; i += 1) {
+            const u0 = points[i].u * KT_TO_MS;
+            const v0 = points[i].v * KT_TO_MS;
+            const u1 = points[i + 1].u * KT_TO_MS;
+            const v1 = points[i + 1].v * KT_TO_MS;
+            srh += (u0 - cu) * (v1 - v0) - (v0 - cv) * (u1 - u0);
+        }
+        return srh;
+    }
+
+    function criticalAngleDeg(levels, storm) {
+        const v10 = interpolateUvAtAgl(levels, 10);
+        const v500 = interpolateUvAtAgl(levels, 500);
+        if (!v10 || !v500 || v10.incomplete || v500.incomplete || !storm) {
+            return null;
+        }
+        const shearU = v500.u - v10.u;
+        const shearV = v500.v - v10.v;
+        const inflowU = v10.u - storm.u;
+        const inflowV = v10.v - storm.v;
+        const shearMag = Math.hypot(shearU, shearV);
+        const inflowMag = Math.hypot(inflowU, inflowV);
+        if (shearMag < 0.25 || inflowMag < 0.25) {
+            return null;
+        }
+        const cos = Math.min(1, Math.max(-1, (shearU * inflowU + shearV * inflowV) / (shearMag * inflowMag)));
+        return (Math.acos(cos) * 180) / Math.PI;
+    }
+
+    function favouredMoverId(srhRm03, srhLm03, srhRm01, srhLm01) {
+        let right = srhRm03;
+        let left = srhLm03;
+        const weakLayer = !Number.isFinite(right) || !Number.isFinite(left)
+            || (Math.abs(right) < 50 && Math.abs(left) < 50);
+        if (weakLayer && Number.isFinite(srhRm01) && Number.isFinite(srhLm01)) {
+            right = srhRm01;
+            left = srhLm01;
+        }
+        if (!Number.isFinite(right) || !Number.isFinite(left)) {
+            return null;
+        }
+        return Math.abs(right) >= Math.abs(left) ? 'RM' : 'LM';
+    }
+
+    function mixingRatioFromDewpoint(dewpointC, pressureHpa) {
+        if (!Number.isFinite(dewpointC) || !Number.isFinite(pressureHpa) || pressureHpa <= 0) {
+            return null;
+        }
+        return saturationMixingRatio(dewpointC, pressureHpa);
+    }
+
+    function virtualTempK(tempC, mixingRatio) {
+        if (!Number.isFinite(tempC)) {
+            return null;
+        }
+        const mixing = Number.isFinite(mixingRatio) && mixingRatio > 0 ? mixingRatio : 0;
+        return (tempC + 273.15) * (1 + 0.61 * mixing);
+    }
+
+    function interpolateProfileAtPressure(levels, pressure, keys = ['height', 'temperature', 'dewpoint']) {
+        const usable = (levels || []).filter((level) => Number.isFinite(level.pressure));
+        if (!usable.length || !Number.isFinite(pressure)) {
+            return null;
+        }
+        const sorted = [...usable].sort((a, b) => b.pressure - a.pressure);
+        if (pressure >= sorted[0].pressure) {
+            return Object.fromEntries(keys.map((key) => [key, sorted[0][key]]));
+        }
+        const last = sorted[sorted.length - 1];
+        if (pressure <= last.pressure) {
+            return Object.fromEntries(keys.map((key) => [key, last[key]]));
+        }
+        for (let i = 0; i < sorted.length - 1; i += 1) {
+            const lower = sorted[i];
+            const upper = sorted[i + 1];
+            if (pressure > lower.pressure || pressure < upper.pressure) {
+                continue;
+            }
+            const logLower = Math.log(lower.pressure);
+            const logUpper = Math.log(upper.pressure);
+            const t = (logLower - Math.log(pressure)) / Math.max(logLower - logUpper, 1e-9);
+            const sample = {};
+            keys.forEach((key) => {
+                if (!Number.isFinite(lower[key]) || !Number.isFinite(upper[key])) {
+                    sample[key] = null;
+                    return;
+                }
+                sample[key] = lower[key] + t * (upper[key] - lower[key]);
+            });
+            return sample;
+        }
+        return null;
+    }
+
+    function interpolateScalarAtAgl(levels, targetAgl, key) {
+        const surfaceHeightM = levels.find((level) => level.isSurface)?.height;
+        const points = (levels || [])
+            .map((level) => {
+                const aglM = levelAglM(level, surfaceHeightM);
+                if (!Number.isFinite(aglM) || !Number.isFinite(level[key])) {
+                    return null;
+                }
+                return { aglM, value: level[key] };
+            })
+            .filter(Boolean)
+            .sort((a, b) => a.aglM - b.aglM);
+        if (points.length < 2 || !Number.isFinite(targetAgl)) {
+            return null;
+        }
+        if (targetAgl <= points[0].aglM) {
+            return points[0].value;
+        }
+        const last = points[points.length - 1];
+        if (targetAgl >= last.aglM) {
+            return last.value;
+        }
+        for (let i = 0; i < points.length - 1; i += 1) {
+            const lower = points[i];
+            const upper = points[i + 1];
+            if (targetAgl < lower.aglM || targetAgl > upper.aglM) {
+                continue;
+            }
+            const t = (targetAgl - lower.aglM) / Math.max(upper.aglM - lower.aglM, 1e-6);
+            return lower.value + t * (upper.value - lower.value);
+        }
+        return null;
+    }
+
+    function lclTemperatureC(tempC, dewpointC) {
+        if (!Number.isFinite(tempC) || !Number.isFinite(dewpointC)) {
+            return null;
+        }
+        const vaporPressure = saturationVaporPressureHpa(dewpointC);
+        if (!(vaporPressure > 0)) {
+            return null;
+        }
+        const tlclK = 55 + 2840 / (3.5 * Math.log(tempC + 273.15) - Math.log(vaporPressure) - 4.805);
+        return Number.isFinite(tlclK) ? tlclK - 273.15 : null;
+    }
+
+    function mixedLayerParcel(levels) {
+        const surface = levels.find((level) => level.isSurface) || levels[0];
+        if (!surface || !Number.isFinite(surface.pressure) || !Number.isFinite(surface.temperature)) {
+            return null;
+        }
+        const layerTop = surface.pressure - 100;
+        const layer = levels.filter((level) => (
+            Number.isFinite(level.pressure)
+            && level.pressure <= surface.pressure + 0.2
+            && level.pressure >= layerTop
+        ));
+        let thetaSum = 0;
+        let mixingSum = 0;
+        let count = 0;
+        layer.forEach((level) => {
+            if (!Number.isFinite(level.temperature) || !Number.isFinite(level.dewpoint)) {
+                return;
+            }
+            const mixing = mixingRatioFromDewpoint(level.dewpoint, level.pressure);
+            if (!Number.isFinite(mixing)) {
+                return;
+            }
+            thetaSum += potentialTempC(level.temperature, level.pressure);
+            mixingSum += mixing;
+            count += 1;
+        });
+        if (count >= 2) {
+            const mixingRatio = mixingSum / count;
+            const temperature = dryAdiabatTempC(thetaSum / count, surface.pressure);
+            return {
+                pressure: surface.pressure,
+                temperature,
+                dewpoint: dewpointFromMixingRatio(mixingRatio, surface.pressure),
+                mixingRatio,
+            };
+        }
+        const mixingRatio = mixingRatioFromDewpoint(surface.dewpoint, surface.pressure);
+        if (!Number.isFinite(mixingRatio)) {
+            return null;
+        }
+        return {
+            pressure: surface.pressure,
+            temperature: surface.temperature,
+            dewpoint: surface.dewpoint,
+            mixingRatio,
+        };
+    }
+
+    function tempOnMoistPath(moistPoints, pressure) {
+        const usable = (moistPoints || []).filter((point) => (
+            Number.isFinite(point.pressure) && Number.isFinite(point.temperature)
+        ));
+        if (!usable.length || !Number.isFinite(pressure)) {
+            return null;
+        }
+        if (pressure >= usable[0].pressure) {
+            return usable[0].temperature;
+        }
+        const last = usable[usable.length - 1];
+        if (pressure <= last.pressure) {
+            return last.temperature;
+        }
+        for (let i = 0; i < usable.length - 1; i += 1) {
+            const a = usable[i];
+            const b = usable[i + 1];
+            const lo = Math.min(a.pressure, b.pressure);
+            const hi = Math.max(a.pressure, b.pressure);
+            if (pressure < lo || pressure > hi) {
+                continue;
+            }
+            const t = (Math.log(a.pressure) - Math.log(pressure))
+                / Math.max(Math.log(a.pressure) - Math.log(b.pressure), 1e-9);
+            return a.temperature + t * (b.temperature - a.temperature);
+        }
+        return null;
+    }
+
+    function computeParcelCapeAndLcl(profile) {
+        const levels = (profile?.levels || [])
+            .filter((level) => Number.isFinite(level.pressure) && Number.isFinite(level.temperature))
+            .sort((a, b) => b.pressure - a.pressure);
+        if (levels.length < 4) {
+            return { cape: null, lclAglM: null };
+        }
+        const parcel = mixedLayerParcel(levels);
+        if (!parcel || !Number.isFinite(parcel.temperature) || !Number.isFinite(parcel.dewpoint)) {
+            return { cape: null, lclAglM: null };
+        }
+        const lclC = lclTemperatureC(parcel.temperature, parcel.dewpoint);
+        if (!Number.isFinite(lclC)) {
+            return { cape: null, lclAglM: null };
+        }
+        const lclP = parcel.pressure * Math.pow((lclC + 273.15) / (parcel.temperature + 273.15), 1 / KAPPA);
+        const surfaceHeightM = profileSurfaceHeightM(profile);
+        const lclSample = interpolateProfileAtPressure(levels, lclP, ['height']);
+        const lclAglM = Number.isFinite(lclSample?.height) && Number.isFinite(surfaceHeightM)
+            ? Math.max(0, lclSample.height - surfaceHeightM)
+            : null;
+        const pTop = levels[levels.length - 1].pressure;
+        const dryTheta = potentialTempC(parcel.temperature, parcel.pressure);
+        const moistPoints = integrateMoistAdiabat(lclC, Math.min(lclP, parcel.pressure), pTop, 5);
+
+        let cape = 0;
+        let seenPositive = false;
+        let ended = false;
+        let prevP = null;
+        let prevDiff = null;
+        for (let pressure = parcel.pressure; pressure >= pTop + 0.4 && !ended; pressure -= 5) {
+            const parcelTemp = pressure >= lclP
+                ? dryAdiabatTempC(dryTheta, pressure)
+                : tempOnMoistPath(moistPoints, pressure);
+            const env = interpolateProfileAtPressure(levels, pressure, ['temperature', 'dewpoint']);
+            if (!Number.isFinite(parcelTemp) || !env || !Number.isFinite(env.temperature)) {
+                continue;
+            }
+            const parcelMix = pressure > lclP
+                ? parcel.mixingRatio
+                : saturationMixingRatio(parcelTemp, pressure);
+            const envMix = mixingRatioFromDewpoint(env.dewpoint, pressure);
+            const tvParcel = virtualTempK(parcelTemp, parcelMix);
+            const tvEnv = virtualTempK(env.temperature, envMix);
+            if (!Number.isFinite(tvParcel) || !Number.isFinite(tvEnv)) {
+                continue;
+            }
+            const diff = tvParcel - tvEnv;
+            if (prevP != null && prevDiff != null && pressure < lclP) {
+                const dlnp = Math.log(prevP / pressure);
+                const avgDiff = 0.5 * (diff + prevDiff);
+                if (avgDiff > 0) {
+                    seenPositive = true;
+                    cape += RD * avgDiff * dlnp;
+                } else if (seenPositive) {
+                    ended = true;
+                }
+            }
+            prevP = pressure;
+            prevDiff = diff;
+        }
+        if (!Number.isFinite(cape) || cape < 0) {
+            cape = 0;
+        }
+        return { cape, lclAglM };
+    }
+
+    function precipitableWaterMm(profile) {
+        const levels = (profile?.levels || [])
+            .filter((level) => Number.isFinite(level.pressure) && Number.isFinite(level.dewpoint))
+            .sort((a, b) => b.pressure - a.pressure);
+        if (levels.length < 2) {
+            return null;
+        }
+        let precipitable = 0;
+        for (let i = 0; i < levels.length - 1; i += 1) {
+            const w0 = mixingRatioFromDewpoint(levels[i].dewpoint, levels[i].pressure);
+            const w1 = mixingRatioFromDewpoint(levels[i + 1].dewpoint, levels[i + 1].pressure);
+            if (!Number.isFinite(w0) || !Number.isFinite(w1)) {
+                continue;
+            }
+            const dpPa = (levels[i].pressure - levels[i + 1].pressure) * 100;
+            if (dpPa <= 0) {
+                continue;
+            }
+            precipitable += 0.5 * (w0 + w1) * dpPa / GRAVITY_MS2;
+        }
+        return Number.isFinite(precipitable) ? precipitable : null;
+    }
+
+    function wetBulbC(tempC, dewpointC) {
+        if (!Number.isFinite(tempC) || !Number.isFinite(dewpointC)) {
+            return null;
+        }
+        const esT = saturationVaporPressureHpa(tempC);
+        const esTd = saturationVaporPressureHpa(dewpointC);
+        if (!(esT > 0)) {
+            return null;
+        }
+        const rh = Math.min(100, Math.max(0, 100 * esTd / esT));
+        return tempC * Math.atan(0.151977 * Math.sqrt(rh + 8.313659))
+            + Math.atan(tempC + rh)
+            - Math.atan(rh - 1.676331)
+            + 0.00391838 * (rh ** 1.5) * Math.atan(0.023101 * rh)
+            - 4.686035;
+    }
+
+    function heightWhenCrossingC(profile, targetC, useWetBulb) {
+        const surfaceHeightM = profileSurfaceHeightM(profile);
+        const points = (profile?.levels || [])
+            .map((level) => {
+                if (!Number.isFinite(level.height) || !Number.isFinite(level.temperature)) {
+                    return null;
+                }
+                const value = useWetBulb ? wetBulbC(level.temperature, level.dewpoint) : level.temperature;
+                if (!Number.isFinite(value)) {
+                    return null;
+                }
+                return { height: level.height, value };
+            })
+            .filter(Boolean)
+            .sort((a, b) => a.height - b.height);
+        for (let i = 0; i < points.length - 1; i += 1) {
+            const lower = points[i];
+            const upper = points[i + 1];
+            if ((lower.value - targetC) * (upper.value - targetC) > 0) {
+                continue;
+            }
+            const span = upper.value - lower.value;
+            const t = Math.abs(span) < 1e-6 ? 0 : (targetC - lower.value) / span;
+            const height = lower.height + t * (upper.height - lower.height);
+            return Number.isFinite(surfaceHeightM) ? height - surfaceHeightM : height;
+        }
+        return null;
+    }
+
+    function lowLevelLapseKPerKm(profile) {
+        const surface = profile?.levels?.find((level) => level.isSurface);
+        const t3 = interpolateScalarAtAgl(profile?.levels || [], 3000, 'temperature');
+        if (!Number.isFinite(surface?.temperature) || !Number.isFinite(t3)) {
+            return null;
+        }
+        return (surface.temperature - t3) / 3;
+    }
+
+    function midLevelIsDry(profile) {
+        const mid = (profile?.levels || []).filter((level) => (
+            Number.isFinite(level.pressure)
+            && level.pressure <= 700
+            && level.pressure >= 500
+            && Number.isFinite(level.temperature)
+            && Number.isFinite(level.dewpoint)
+        ));
+        if (!mid.length) {
+            return false;
+        }
+        const depression = mid.reduce((sum, level) => sum + (level.temperature - level.dewpoint), 0) / mid.length;
+        return depression >= 12;
+    }
+
+    function deepLayerIsMoist(profile) {
+        const layer = (profile?.levels || []).filter((level) => (
+            Number.isFinite(level.pressure)
+            && level.pressure >= 400
+            && Number.isFinite(level.temperature)
+            && Number.isFinite(level.dewpoint)
+        ));
+        if (!layer.length) {
+            return false;
+        }
+        let rhSum = 0;
+        let count = 0;
+        layer.forEach((level) => {
+            const esT = saturationVaporPressureHpa(level.temperature);
+            const esTd = saturationVaporPressureHpa(level.dewpoint);
+            if (!(esT > 0)) {
+                return;
+            }
+            rhSum += Math.min(100, Math.max(0, 100 * esTd / esT));
+            count += 1;
+        });
+        return count > 0 && (rhSum / count) >= 70;
+    }
+
+    function computeDcape(profile) {
+        const levels = (profile?.levels || [])
+            .filter((level) => Number.isFinite(level.pressure) && Number.isFinite(level.temperature))
+            .sort((a, b) => b.pressure - a.pressure);
+        const surface = levels.find((level) => level.isSurface) || levels[0];
+        if (!surface || levels.length < 4) {
+            return null;
+        }
+        const mid = levels.filter((level) => (
+            level.pressure <= 700
+            && level.pressure >= 500
+            && Number.isFinite(level.dewpoint)
+        ));
+        if (!mid.length) {
+            return null;
+        }
+        const source = mid.reduce((driest, level) => {
+            const depression = level.temperature - level.dewpoint;
+            if (!driest || depression > driest.depression) {
+                return { ...level, depression };
+            }
+            return driest;
+        }, null);
+        const startTw = wetBulbC(source.temperature, source.dewpoint);
+        if (!Number.isFinite(startTw)) {
+            return null;
+        }
+        const moistDown = integrateMoistAdiabat(startTw, source.pressure, surface.pressure, 5);
+        let dcape = 0;
+        let prevP = null;
+        let prevDiff = null;
+        for (let pressure = source.pressure; pressure <= surface.pressure + 0.4; pressure += 5) {
+            const parcelTemp = tempOnMoistPath(moistDown, Math.min(pressure, surface.pressure));
+            const env = interpolateProfileAtPressure(levels, Math.min(pressure, surface.pressure), ['temperature', 'dewpoint']);
+            if (!Number.isFinite(parcelTemp) || !env || !Number.isFinite(env.temperature)) {
+                continue;
+            }
+            const tvParcel = virtualTempK(parcelTemp, saturationMixingRatio(parcelTemp, pressure));
+            const tvEnv = virtualTempK(env.temperature, mixingRatioFromDewpoint(env.dewpoint, pressure));
+            if (!Number.isFinite(tvParcel) || !Number.isFinite(tvEnv)) {
+                continue;
+            }
+            const diff = tvEnv - tvParcel;
+            if (prevP != null && prevDiff != null) {
+                const dlnp = Math.log(pressure / prevP);
+                const avgDiff = 0.5 * (diff + prevDiff);
+                if (avgDiff > 0 && dlnp > 0) {
+                    dcape += RD * avgDiff * dlnp;
+                }
+            }
+            prevP = pressure;
+            prevDiff = diff;
+        }
+        return Number.isFinite(dcape) && dcape > 0 ? dcape : 0;
+    }
+
+    function meanWindPressureLayerKt(profile, pBottom, pTop) {
+        const points = (profile?.levels || [])
+            .map((level) => {
+                const uv = windComponentsKt(level.windSpeedKt, level.windDirDeg);
+                if (!uv || !Number.isFinite(level.pressure)) {
+                    return null;
+                }
+                return { pressure: level.pressure, u: uv.u, v: uv.v };
+            })
+            .filter((point) => point && point.pressure <= pBottom + 1 && point.pressure >= pTop - 1)
+            .sort((a, b) => b.pressure - a.pressure);
+        if (!points.length) {
+            return null;
+        }
+        if (points.length === 1) {
+            return Math.hypot(points[0].u, points[0].v);
+        }
+        let uSum = 0;
+        let vSum = 0;
+        let dpSum = 0;
+        for (let i = 0; i < points.length - 1; i += 1) {
+            const dp = points[i].pressure - points[i + 1].pressure;
+            if (dp <= 0) {
+                continue;
+            }
+            uSum += 0.5 * (points[i].u + points[i + 1].u) * dp;
+            vSum += 0.5 * (points[i].v + points[i + 1].v) * dp;
+            dpSum += dp;
+        }
+        if (dpSum <= 0) {
+            return null;
+        }
+        return Math.hypot(uSum / dpSum, vSum / dpSum);
+    }
+
+    function surfaceTo850DewpointC(profile) {
+        const levels = profile?.levels || [];
+        const surface = levels.find((level) => level.isSurface);
+        const h850 = interpolateProfileAtPressure(levels, 850, ['dewpoint']);
+        const values = [surface?.dewpoint, h850?.dewpoint].filter(Number.isFinite);
+        if (!values.length) {
+            return null;
+        }
+        return values.reduce((sum, value) => sum + value, 0) / values.length;
+    }
+
+    function computeHodographDiagnostics(profile) {
+        const windLevels = levelsWithAglUv(profile);
+        const v10 = interpolateUvAtAgl(windLevels, 10);
+        const v1 = interpolateUvAtAgl(windLevels, 1000);
+        const v6 = interpolateUvAtAgl(windLevels, 6000);
+        const bunkers = bunkersStormMotion(windLevels);
+        const srhRm01 = bunkers ? stormRelativeHelicity(windLevels, 10, 1000, bunkers.rm) : null;
+        const srhLm01 = bunkers ? stormRelativeHelicity(windLevels, 10, 1000, bunkers.lm) : null;
+        const srhRm03 = bunkers ? stormRelativeHelicity(windLevels, 10, 3000, bunkers.rm) : null;
+        const srhLm03 = bunkers ? stormRelativeHelicity(windLevels, 10, 3000, bunkers.lm) : null;
+        const favoured = favouredMoverId(srhRm03, srhLm03, srhRm01, srhLm01);
+        const favouredMotion = favoured === 'LM' ? bunkers?.lm : bunkers?.rm;
+        const thermo = computeParcelCapeAndLcl(profile);
+        const pwMm = precipitableWaterMm(profile);
+        const wbzAglM = heightWhenCrossingC(profile, 0, true);
+        const frzAglM = heightWhenCrossingC(profile, 0, false);
+        const surfaceHeightM = profileSurfaceHeightM(profile);
+        const frzAmslM = Number.isFinite(frzAglM) && Number.isFinite(surfaceHeightM)
+            ? frzAglM + surfaceHeightM
+            : frzAglM;
+        const lapse03 = lowLevelLapseKPerKm(profile);
+        const midDry = midLevelIsDry(profile);
+        const deepMoist = deepLayerIsMoist(profile);
+        const dcape = computeDcape(profile);
+        const wind900to500 = meanWindPressureLayerKt(profile, 900, 500);
+        const sfc850Td = surfaceTo850DewpointC(profile);
+        const shear01 = bulkShearKt(v10, v1);
+        const shear06 = bulkShearKt(v10, v6);
+        const mean06 = bunkers?.mean ? Math.hypot(bunkers.mean.u, bunkers.mean.v) : null;
+        const stormMotionKt = favouredMotion
+            ? Math.hypot(favouredMotion.u, favouredMotion.v)
+            : mean06;
+        const kinematics = {
+            windLevels,
+            bunkers,
+            shear01,
+            shear06,
+            mean06,
+            srhRm01,
+            srhLm01,
+            srhRm03,
+            srhLm03,
+            favoured,
+            criticalAngle: criticalAngleDeg(windLevels, favouredMotion),
+        };
+        return {
+            ...kinematics,
+            cape: thermo.cape,
+            lclAglM: thermo.lclAglM,
+            pwMm,
+            wbzAglM,
+            frzAglM,
+            lapse03,
+            midDry,
+            deepMoist,
+            stormMode: convectiveStormMode(kinematics),
+            stormMovement: stormMovementFlags(kinematics),
+            severe: severeWeatherFlags(kinematics, {
+                cape: thermo.cape,
+                lclAglM: thermo.lclAglM,
+                pwMm,
+                wbzAglM,
+                frzAglM,
+                frzAmslM,
+                midDry,
+                deepMoist,
+                dcape,
+                wind900to500,
+                sfc850Td,
+                stormMotionKt,
+            }),
+        };
+    }
+
+    function flagValue(isLikely) {
+        return isLikely ? 'likely' : 'not favoured';
+    }
+
+    function peakAbsSrh03(k) {
+        const rm03 = Number.isFinite(k.srhRm03) ? Math.abs(k.srhRm03) : 0;
+        const lm03 = Number.isFinite(k.srhLm03) ? Math.abs(k.srhLm03) : 0;
+        return Math.max(rm03, lm03);
+    }
+
+    function convectiveStormMode(k) {
+        if (!Number.isFinite(k.shear06) || !k.bunkers) {
+            return '—';
+        }
+        const peakSrh = peakAbsSrh03(k);
+        if (k.shear06 >= 35 && peakSrh >= 75) {
+            return 'Supercell';
+        }
+        if (k.shear06 < 20) {
+            return 'Single cell';
+        }
+        if (k.shear06 >= 25 && peakSrh < 75) {
+            return 'Multicell (squall)';
+        }
+        return 'Multicell (cluster)';
+    }
+
+    function stormMovementFlags(k) {
+        if (!Number.isFinite(k.shear06) || !k.bunkers) {
+            return {
+                rightMovers: '—',
+                leftMovers: '—',
+                splitting: '—',
+                anomPropUnlikely: '—',
+            };
+        }
+        const rm03 = Math.abs(k.srhRm03);
+        const lm03 = Math.abs(k.srhLm03);
+        const supercellShear = k.shear06 >= 35;
+        const bothUseful = rm03 >= 100 && lm03 >= 100;
+        const similarSrh = bothUseful && (Math.min(rm03, lm03) / Math.max(rm03, lm03) >= 0.5);
+        const splitting = k.shear06 >= 40 && bothUseful && (similarSrh || k.shear06 >= 50);
+        return {
+            rightMovers: flagValue(supercellShear && (k.favoured === 'RM' || splitting)),
+            leftMovers: flagValue(supercellShear && (k.favoured === 'LM' || splitting)),
+            splitting: flagValue(splitting),
+            anomPropUnlikely: flagValue(k.shear06 < 30 || (rm03 < 75 && lm03 < 75)),
+        };
+    }
+
+    function severeWeatherFlags(k, th) {
+        if (!Number.isFinite(th.cape)) {
+            return {
+                tornadoes: '—',
+                hail20: '—',
+                hail50: '—',
+                gust48: '—',
+                gust67: '—',
+                rain: '—',
+            };
+        }
+        const favouredSrh01 = k.favoured === 'LM' ? k.srhLm01 : k.srhRm01;
+        const wbz = Number.isFinite(th.wbzAglM) ? th.wbzAglM : th.frzAglM;
+        const frzFt = Number.isFinite(th.frzAmslM)
+            ? th.frzAmslM * 3.28084
+            : (Number.isFinite(th.frzAglM) ? th.frzAglM * 3.28084 : null);
+        const warmCloudM = Number.isFinite(th.frzAglM) && Number.isFinite(th.lclAglM)
+            ? th.frzAglM - th.lclAglM
+            : null;
+        const mcsOrSupercell = Number.isFinite(k.shear06) && k.shear06 >= 25;
+        const supercellShear = Number.isFinite(k.shear06) && k.shear06 >= 35;
+        const highBuoyancy = th.cape >= 1000;
+        const veryHighBuoyancy = th.cape >= 2000;
+        const evaporative = (Number.isFinite(th.lclAglM) && th.lclAglM >= 1500 && th.midDry)
+            || (Number.isFinite(th.dcape) && th.dcape >= 1000);
+        const strongEvaporative = Number.isFinite(th.dcape) && th.dcape >= 1500 && th.midDry;
+        const strongMomentum = (Number.isFinite(th.stormMotionKt) && th.stormMotionKt >= 50)
+            || (Number.isFinite(k.mean06) && k.mean06 >= 50)
+            || (Number.isFinite(th.wind900to500) && th.wind900to500 >= 50);
+        const tornadoes = highBuoyancy
+            && supercellShear
+            && Number.isFinite(th.lclAglM) && th.lclAglM <= 1000
+            && Number.isFinite(k.shear01) && k.shear01 >= 25
+            && Number.isFinite(favouredSrh01) && Math.abs(favouredSrh01) >= 100
+            && Number.isFinite(k.criticalAngle) && k.criticalAngle >= 60 && k.criticalAngle <= 120;
+        const hail20 = highBuoyancy
+            && mcsOrSupercell
+            && Number.isFinite(frzFt) && frzFt <= 14000
+            && Number.isFinite(wbz) && wbz >= 1500 && wbz <= 3600;
+        const hail50 = veryHighBuoyancy
+            && supercellShear
+            && Number.isFinite(frzFt) && frzFt <= 11500
+            && Number.isFinite(wbz) && wbz >= 2100 && wbz <= 2800;
+        const gust48 = highBuoyancy && mcsOrSupercell && evaporative && strongMomentum;
+        const gust67 = veryHighBuoyancy && supercellShear && strongEvaporative && strongMomentum;
+        const rain = highBuoyancy
+            && Number.isFinite(th.lclAglM) && th.lclAglM <= 1000
+            && ((Number.isFinite(th.pwMm) && th.pwMm >= 40) || th.deepMoist)
+            && Number.isFinite(warmCloudM) && warmCloudM >= 3000
+            && Number.isFinite(th.stormMotionKt) && th.stormMotionKt <= 15
+            && Number.isFinite(th.sfc850Td) && th.sfc850Td >= 14;
+        return {
+            tornadoes: flagValue(tornadoes),
+            hail20: flagValue(hail20),
+            hail50: flagValue(hail50),
+            gust48: flagValue(gust48),
+            gust67: flagValue(gust67),
+            rain: flagValue(rain),
+        };
+    }
+
+    function hodographAglLabels(profile) {
+        const levels = levelsWithAglUv(profile);
+        const labels = [];
+        const surface = levels.find((level) => level.isSurface) || levels[0];
+        if (surface) {
+            labels.push({ u: surface.u, v: surface.v, text: 'SFC', isSurface: true });
+        }
+        HODO_AGL_LABELS.forEach(({ aglM, text }) => {
+            const native = levels
+                .filter((level) => !level.isSurface)
+                .sort((a, b) => Math.abs(a.aglM - aglM) - Math.abs(b.aglM - aglM))[0];
+            if (native && Math.abs(native.aglM - aglM) <= HODO_LABEL_SNAP_M) {
+                labels.push({ u: native.u, v: native.v, text, interpolated: false });
+                return;
+            }
+            const interpolated = interpolateUvAtAgl(levels, aglM);
+            if (interpolated && !interpolated.incomplete) {
+                labels.push({ u: interpolated.u, v: interpolated.v, text, interpolated: true });
+            }
+        });
+        return labels;
+    }
+
+    function formatWindDddSs(u, v) {
+        if (!Number.isFinite(u) || !Number.isFinite(v)) {
+            return '—';
+        }
+        const speed = Math.hypot(u, v);
+        if (speed < 0.5) {
+            return '000° 0 kts';
+        }
+        const dir = ((Math.atan2(-u, -v) * 180) / Math.PI + 360) % 360;
+        return `${formatWindDir(dir)}° ${Math.round(speed)} kts`;
+    }
+
+    function formatSrh(value) {
+        if (!Number.isFinite(value)) {
+            return '—';
+        }
+        return String(Math.round(value));
+    }
+
+    function formatShearKt(value) {
+        if (!Number.isFinite(value)) {
+            return '—';
+        }
+        return `${Math.round(value)} kts`;
+    }
+
+    function formatAngleDeg(value) {
+        if (!Number.isFinite(value)) {
+            return '—';
+        }
+        return `${Math.round(value)}°`;
+    }
+
+    function renderIndexItems(items) {
+        return items.map(({ label, value }) => (
+            `<div><dt>${label}</dt><dd>${value}</dd></div>`
+        )).join('');
+    }
+
+    function selectedStormMovementLabel(flags) {
+        if (!flags || flags.splitting === '—') {
+            return '—';
+        }
+        if (flags.splitting === 'likely') {
+            return 'Splitting supercells favoured';
+        }
+        if (flags.leftMovers === 'likely') {
+            return 'Left movers favoured';
+        }
+        if (flags.rightMovers === 'likely') {
+            return 'Right movers favoured';
+        }
+        return 'Anomalous propagation unlikely';
+    }
+
+    function applicableSevereLabels(severe) {
+        if (!severe || severe.tornadoes === '—') {
+            return [];
+        }
+        return [
+            ['tornadoes', 'Tornadoes'],
+            ['hail20', 'Large hail (20 mm)'],
+            ['hail50', 'Giant hail (50 mm)'],
+            ['gust48', 'Damaging gusts (>48 kt)'],
+            ['gust67', 'Destructive gusts (>67 kt)'],
+            ['rain', 'Heavy rain'],
+        ].filter(([key]) => severe[key] === 'likely').map(([, label]) => label);
+    }
+
+    function renderHodographReadout(diag) {
+        if (!indicesEl || !stormModeEl || !stormMovementEl || !severeEl) {
+            return;
+        }
+        if (!diag) {
+            indicesEl.innerHTML = '';
+            stormModeEl.textContent = '';
+            stormMovementEl.textContent = '';
+            severeEl.innerHTML = '';
+            return;
+        }
+        indicesEl.innerHTML = renderIndexItems([
+            { label: 'Shear 0–1km', value: formatShearKt(diag.shear01) },
+            { label: 'Shear 0–6km', value: formatShearKt(diag.shear06) },
+            { label: 'Bunkers L', value: formatWindDddSs(diag.bunkers?.lm?.u, diag.bunkers?.lm?.v) },
+            { label: 'Bunkers R', value: formatWindDddSs(diag.bunkers?.rm?.u, diag.bunkers?.rm?.v) },
+            { label: 'RM SRH 0–1km', value: Number.isFinite(diag.srhRm01) ? `${formatSrh(diag.srhRm01)} m²/s²` : '—' },
+            { label: 'LM SRH 0–1km', value: Number.isFinite(diag.srhLm01) ? `${formatSrh(diag.srhLm01)} m²/s²` : '—' },
+            { label: 'RM SRH 0–3km', value: Number.isFinite(diag.srhRm03) ? `${formatSrh(diag.srhRm03)} m²/s²` : '—' },
+            { label: 'LM SRH 0–3km', value: Number.isFinite(diag.srhLm03) ? `${formatSrh(diag.srhLm03)} m²/s²` : '—' },
+            { label: 'Crit. angle', value: formatAngleDeg(diag.criticalAngle) },
+        ]);
+        stormModeEl.textContent = diag.stormMode || '—';
+        stormMovementEl.textContent = selectedStormMovementLabel(diag.stormMovement);
+        const severeItems = applicableSevereLabels(diag.severe);
+        if (diag.severe?.tornadoes === '—') {
+            severeEl.innerHTML = '<li class="hodograph-flag-single is-missing">—</li>';
+        } else if (!severeItems.length) {
+            severeEl.innerHTML = '<li class="hodograph-flag-single is-not-favoured">None favoured</li>';
+        } else {
+            severeEl.innerHTML = severeItems
+                .map((label) => `<li class="hodograph-flag-single is-likely">${label}</li>`)
+                .join('');
+        }
+    }
+
+    const BUNKERS_COLORS = {
+        steering: '#d62828',
+        shear: '#2a9d4a',
+        propagation: '#1d4ed8',
+        rm: '#0d7377',
+        lm: '#c05621',
+        final: '#5b21b6',
+    };
+
+    function drawHodoArrow(ctx, layout, fromU, fromV, toU, toV, color, width = 1.6) {
+        const from = hodoUvToScreen(fromU, fromV, layout);
+        const to = hodoUvToScreen(toU, toV, layout);
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        const length = Math.hypot(dx, dy);
+        if (length < 5) {
+            return;
+        }
+        const ux = dx / length;
+        const uy = dy / length;
+        const head = Math.min(9, length * 0.3);
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
+        ctx.lineWidth = width;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(from.x, from.y);
+        ctx.lineTo(to.x - ux * head * 0.4, to.y - uy * head * 0.4);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(to.x, to.y);
+        ctx.lineTo(to.x - ux * head - uy * head * 0.42, to.y - uy * head + ux * head * 0.42);
+        ctx.lineTo(to.x - ux * head + uy * head * 0.42, to.y - uy * head - ux * head * 0.42);
+        ctx.closePath();
+        ctx.fill();
+    }
+
+    function drawBunkersRightAngle(ctx, layout, bunkers) {
+        const { mean, shear, deviate } = bunkers;
+        if (!mean || !shear || !deviate) {
+            return;
+        }
+        const origin = hodoUvToScreen(mean.u, mean.v, layout);
+        const shearEnd = hodoUvToScreen(mean.u + shear.u, mean.v + shear.v, layout);
+        const devEnd = hodoUvToScreen(mean.u + deviate.u, mean.v + deviate.v, layout);
+        let sx = shearEnd.x - origin.x;
+        let sy = shearEnd.y - origin.y;
+        let dx = devEnd.x - origin.x;
+        let dy = devEnd.y - origin.y;
+        const shearLen = Math.hypot(sx, sy);
+        const devLen = Math.hypot(dx, dy);
+        if (shearLen < 4 || devLen < 4) {
+            return;
+        }
+        const size = 8;
+        sx = (sx / shearLen) * size;
+        sy = (sy / shearLen) * size;
+        dx = (dx / devLen) * size;
+        dy = (dy / devLen) * size;
+        ctx.strokeStyle = BUNKERS_COLORS.propagation;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(origin.x + sx, origin.y + sy);
+        ctx.lineTo(origin.x + sx + dx, origin.y + sy + dy);
+        ctx.lineTo(origin.x + dx, origin.y + dy);
+        ctx.stroke();
+    }
+
+    function bindBunkersLegend() {
+        if (!bunkersLegendEl || bunkersLegendEl.dataset.bound === '1') {
+            return;
+        }
+        bunkersLegendEl.dataset.bound = '1';
+        bunkersLegendEl.addEventListener('click', (event) => {
+            const button = event.target.closest('[data-bunkers-layer]');
+            if (!button) {
+                return;
+            }
+            const layer = button.dataset.bunkersLayer;
+            if (!Object.prototype.hasOwnProperty.call(bunkersOverlay, layer)) {
+                return;
+            }
+            bunkersOverlay[layer] = !bunkersOverlay[layer];
+            syncBunkersLegendUi();
+            if (lastProfile && activeTool === 'hodograph') {
+                renderHodograph(lastProfile, { preserveHover: true });
+            }
+        });
+        syncBunkersLegendUi();
+    }
+
+    function syncBunkersLegendUi() {
+        bunkersLegendEl?.querySelectorAll('[data-bunkers-layer]').forEach((button) => {
+            const layer = button.dataset.bunkersLayer;
+            const on = Boolean(bunkersOverlay[layer]);
+            button.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+    }
+
+    const HODO_HELP = {
+        indices: {
+            title: 'Indices',
+            columns: ['Index', 'Definition', 'Utility'],
+            rows: [
+                ['Shear', 'Magnitude of vector difference between top and bottom layer', 'Larger values indicate potential for storm organisation'],
+                ['Bunkers L / R', '0–6 km mean wind ± 7.5 m/s 90° right of 0.5–6 km shear', 'Estimation of supercell motion'],
+                ['SRH', 'Streamwise helicity of the 0–1 km or 0–3 km layer relative to Bunkers R or L storm motion (m²/s²)', 'Larger absolute values indicate potential for a rotating updraft'],
+                ['Crit. angle', 'Angle between 0–500 m shear and 10 m storm-relative inflow', 'Values close to 90° indicate favourable conditions for tornadic supercells'],
+            ],
+        },
+        mode: {
+            title: 'Storm mode',
+            note: 'Peak |SRH 0–3 km| = max(|RM SRH 0–3 km|, |LM SRH 0–3 km|). CAPE is not used. First matching row wins.',
+            columns: ['Mode', 'Criteria'],
+            rows: [
+                ['Supercell', '0–6 km shear ≥ 35 kt AND peak |SRH 0–3 km| ≥ 75 m²/s²'],
+                ['Single cell', '0–6 km shear &lt; 20 kt'],
+                ['Multicell (squall)', '0–6 km shear ≥ 25 kt AND peak |SRH 0–3 km| &lt; 75 m²/s²'],
+                ['Multicell (cluster)', 'Otherwise'],
+            ],
+        },
+        movement: {
+            title: 'Storm movement',
+            note: 'The displayed label uses the first matching row from top to bottom after the favoured-mover test.',
+            columns: ['Classification', 'Criteria'],
+            rows: [
+                ['Favoured mover', 'Larger |SRH 0–3 km|; if both |SRH 0–3 km| &lt; 50 m²/s², use 0–1 km'],
+                ['Splitting supercells favoured', '0–6 km shear ≥ 40 kt AND |RM SRH 0–3 km| ≥ 100 m²/s² AND |LM SRH 0–3 km| ≥ 100 m²/s² AND (min/max SRH ≥ 0.5 OR 0–6 km shear ≥ 50 kt)'],
+                ['Right movers favoured', '0–6 km shear ≥ 35 kt AND (favoured mover is RM OR splitting)'],
+                ['Left movers favoured', '0–6 km shear ≥ 35 kt AND (favoured mover is LM OR splitting)'],
+                ['Anomalous propagation unlikely', '0–6 km shear &lt; 30 kt OR both |SRH 0–3 km| &lt; 75 m²/s²; also shown when left, right, and split are not favoured'],
+            ],
+        },
+        severe: {
+            title: 'Severe phenomena',
+            note: 'A hazard is listed only when every row for that hazard is true. Mid-level dry means mean T−Td from 700–500 hPa ≥ 12 °C. Deep moist means mean RH from the surface to 400 hPa ≥ 70%.',
+            columns: ['Hazard', 'Parameter', 'Threshold'],
+            rows: [
+                ['Tornadoes', 'CAPE', '≥ 1000 J/kg'],
+                ['Tornadoes', '0–6 km shear', '≥ 35 kt'],
+                ['Tornadoes', 'LCL', '≤ 1 km'],
+                ['Tornadoes', '0–1 km shear', '≥ 25 kt'],
+                ['Tornadoes', 'Favoured |SRH 0–1 km|', '≥ 100 m²/s²'],
+                ['Tornadoes', 'Critical angle', '60–120°'],
+                ['Large hail (20 mm)', 'CAPE', '≥ 1000 J/kg'],
+                ['Large hail (20 mm)', '0–6 km shear', '≥ 25 kt'],
+                ['Large hail (20 mm)', 'Freezing level', '≤ 14,000 ft AMSL'],
+                ['Large hail (20 mm)', 'Wet-bulb zero', '1500–3600 m AGL'],
+                ['Giant hail (50 mm)', 'CAPE', '≥ 2000 J/kg'],
+                ['Giant hail (50 mm)', '0–6 km shear', '≥ 35 kt'],
+                ['Giant hail (50 mm)', 'Freezing level', '≤ 11,500 ft AMSL'],
+                ['Giant hail (50 mm)', 'Wet-bulb zero', '2100–2800 m AGL'],
+                ['Damaging gusts (&gt;48 kt)', 'CAPE', '≥ 1000 J/kg'],
+                ['Damaging gusts (&gt;48 kt)', '0–6 km shear', '≥ 25 kt'],
+                ['Damaging gusts (&gt;48 kt)', 'Evaporative potential', '(LCL ≥ 1.5 km AND mid-level dry) OR DCAPE ≥ 1000 J/kg'],
+                ['Damaging gusts (&gt;48 kt)', 'Momentum', 'storm motion ≥ 50 kt OR 0–6 km mean ≥ 50 kt OR 900–500 hPa wind ≥ 50 kt'],
+                ['Destructive gusts (&gt;67 kt)', 'CAPE', '≥ 2000 J/kg'],
+                ['Destructive gusts (&gt;67 kt)', '0–6 km shear', '≥ 35 kt'],
+                ['Destructive gusts (&gt;67 kt)', 'Evaporative potential', 'DCAPE ≥ 1500 J/kg AND mid-level dry'],
+                ['Destructive gusts (&gt;67 kt)', 'Momentum', 'storm motion ≥ 50 kt OR 0–6 km mean ≥ 50 kt OR 900–500 hPa wind ≥ 50 kt'],
+                ['Heavy rain', 'CAPE', '≥ 1000 J/kg'],
+                ['Heavy rain', 'LCL', '≤ 1 km'],
+                ['Heavy rain', 'Moisture', 'PW ≥ 40 mm OR deep moist'],
+                ['Heavy rain', 'Warm-cloud depth', '≥ 3 km (FZL AGL − LCL AGL)'],
+                ['Heavy rain', 'Storm motion', '≤ 15 kt'],
+                ['Heavy rain', 'SFC–850 hPa Td', '≥ 14 °C'],
+            ],
+        },
+    };
+
+    function firstColumnRowspans(rows) {
+        const spans = new Array(rows.length).fill(1);
+        let i = 0;
+        while (i < rows.length) {
+            let end = i + 1;
+            while (end < rows.length && rows[end][0] === rows[i][0]) {
+                end += 1;
+            }
+            spans[i] = end - i;
+            for (let k = i + 1; k < end; k += 1) {
+                spans[k] = 0;
+            }
+            i = end;
+        }
+        return spans;
+    }
+
+    function renderHelpTable(help) {
+        const spans = help.columns.length > 2 ? firstColumnRowspans(help.rows) : help.rows.map(() => 1);
+        const head = `<tr>${help.columns.map((col) => `<th>${col}</th>`).join('')}</tr>`;
+        const body = help.rows.map((cells, index) => {
+            const first = spans[index] > 1
+                ? `<th scope="row" rowspan="${spans[index]}">${cells[0]}</th>`
+                : (spans[index] === 1 ? `<th scope="row">${cells[0]}</th>` : '');
+            const rest = cells.slice(1).map((cell) => `<td>${cell}</td>`).join('');
+            return `<tr>${first}${rest}</tr>`;
+        }).join('');
+        return `<table class="hodo-help-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+    }
+
+    function isHelpOpen() {
+        return Boolean(helpOverlayEl && !helpOverlayEl.classList.contains('hidden'));
+    }
+
+    function openHodographHelp(topic) {
+        ensureUi();
+        const help = HODO_HELP[topic];
+        if (!help || !helpOverlayEl || !helpTitleEl || !helpBodyEl) {
+            return;
+        }
+        helpTitleEl.textContent = help.title;
+        helpBodyEl.innerHTML = `${help.note ? `<p class="hodo-help-note">${help.note}</p>` : ''}${renderHelpTable(help)}`;
+        helpOverlayEl.classList.remove('hidden');
+        helpOverlayEl.setAttribute('aria-hidden', 'false');
+        helpCloseBtn?.focus();
+    }
+
+    function closeHodographHelp() {
+        if (!helpOverlayEl) {
+            return;
+        }
+        helpOverlayEl.classList.add('hidden');
+        helpOverlayEl.setAttribute('aria-hidden', 'true');
+    }
+
+    function bindHodographHelp() {
+        if (helpOverlayEl?.dataset.bound === '1') {
+            return;
+        }
+        if (helpOverlayEl) {
+            helpOverlayEl.dataset.bound = '1';
+        }
+        document.querySelectorAll('[data-hodo-help]').forEach((button) => {
+            button.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                openHodographHelp(button.dataset.hodoHelp);
+            });
+        });
+        helpCloseBtn?.addEventListener('click', () => {
+            closeHodographHelp();
+        });
+        helpOverlayEl?.addEventListener('click', (event) => {
+            if (event.target === helpOverlayEl) {
+                closeHodographHelp();
+            }
+        });
+    }
+
+    function drawBunkersVectors(ctx, layout, bunkers, favoured) {
+        if (!bunkers?.mean || !bunkers.rm || !bunkers.lm) {
+            return;
+        }
+        const { mean, rm, lm, vLow, v6 } = bunkers;
+        if (bunkersOverlay.shear && vLow && v6) {
+            drawHodoArrow(ctx, layout, vLow.u, vLow.v, v6.u, v6.v, BUNKERS_COLORS.shear, 1.6);
+        }
+        if (bunkersOverlay.steering) {
+            drawHodoArrow(ctx, layout, 0, 0, mean.u, mean.v, BUNKERS_COLORS.steering, 1.8);
+        }
+        if (bunkersOverlay.propagation) {
+            drawHodoArrow(ctx, layout, mean.u, mean.v, rm.u, rm.v, BUNKERS_COLORS.propagation, favoured === 'RM' ? 2 : 1.3);
+            drawHodoArrow(ctx, layout, mean.u, mean.v, lm.u, lm.v, BUNKERS_COLORS.propagation, favoured === 'LM' ? 2 : 1.3);
+            drawBunkersRightAngle(ctx, layout, bunkers);
+        }
+        if (bunkersOverlay.rm) {
+            drawHodoArrow(ctx, layout, 0, 0, rm.u, rm.v, BUNKERS_COLORS.rm, favoured === 'LM' ? 1.3 : 2.2);
+        }
+        if (bunkersOverlay.lm) {
+            drawHodoArrow(ctx, layout, 0, 0, lm.u, lm.v, BUNKERS_COLORS.lm, favoured === 'RM' ? 1.3 : 2.2);
+        }
+    }
+
+    function drawHodographTextLabel(ctx, layout, u, v, text, options = {}) {
+        const { x, y } = hodoUvToScreen(u, v, layout);
+        if (options.dot) {
+            ctx.beginPath();
+            ctx.arc(x, y, options.radius || 2.4, 0, Math.PI * 2);
+            ctx.fillStyle = options.fill || '#1f2a37';
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        }
+        ctx.fillStyle = options.color || '#1f2a37';
+        ctx.font = options.font || 'bold 11px sans-serif';
+        ctx.textAlign = x >= layout.cx ? 'left' : 'right';
+        ctx.textBaseline = options.baseline || 'bottom';
+        const dx = x >= layout.cx ? 6 : -6;
+        const dy = options.dy == null ? -4 : options.dy;
+        ctx.fillText(text, x + dx, y + dy);
     }
 
     function renderProfileTable(profile) {
@@ -2146,7 +3451,10 @@
 
     function renderHodograph(profile, { preserveHover = false } = {}) {
         ensureUi();
-        if (!canvasEl || !profile?.levels?.length) return;
+        if (!canvasEl || !profile?.levels?.length) {
+            renderHodographReadout(null);
+            return;
+        }
         lastProfile = profile;
         lastPlot = null;
         if (!preserveHover) {
@@ -2156,6 +3464,9 @@
                 hoverEl.innerHTML = '';
             }
         }
+
+        const hodographDiagnostics = computeHodographDiagnostics(profile);
+        renderHodographReadout(hodographDiagnostics);
 
         const width = canvasEl.clientWidth || 640;
         const height = canvasEl.clientHeight || 520;
@@ -2259,16 +3570,42 @@
                 ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
                 ctx.lineWidth = 1;
                 ctx.stroke();
-
-                const label = hodographLabelForLevel(point);
-                if (label) {
-                    ctx.fillStyle = '#1f2a37';
-                    ctx.font = point.isSurface ? 'bold 11px sans-serif' : '10px sans-serif';
-                    ctx.textAlign = x >= cx ? 'left' : 'right';
-                    ctx.textBaseline = 'bottom';
-                    ctx.fillText(label, x + (x >= cx ? 6 : -6), y - 4);
-                }
             });
+
+            hodographAglLabels(profile).forEach((label) => {
+                drawHodographTextLabel(ctx, lastHodoLayout, label.u, label.v, label.text, {
+                    dot: Boolean(label.interpolated),
+                    radius: 2.3,
+                    fill: '#1f2a37',
+                    font: label.isSurface ? 'bold 11px sans-serif' : '10px sans-serif',
+                });
+            });
+
+            if (hodographDiagnostics?.bunkers) {
+                drawBunkersVectors(ctx, lastHodoLayout, hodographDiagnostics.bunkers, hodographDiagnostics.favoured);
+                if (bunkersOverlay.lm) {
+                    drawHodographTextLabel(ctx, lastHodoLayout, hodographDiagnostics.bunkers.lm.u, hodographDiagnostics.bunkers.lm.v, 'LM', {
+                        dot: true,
+                        radius: 3.4,
+                        fill: '#c05621',
+                        color: '#9a3412',
+                        font: 'bold 10px sans-serif',
+                        baseline: 'top',
+                        dy: 7,
+                    });
+                }
+                if (bunkersOverlay.rm) {
+                    drawHodographTextLabel(ctx, lastHodoLayout, hodographDiagnostics.bunkers.rm.u, hodographDiagnostics.bunkers.rm.v, 'RM', {
+                        dot: true,
+                        radius: 3.4,
+                        fill: '#0d7377',
+                        color: '#0f4c5c',
+                        font: 'bold 10px sans-serif',
+                        baseline: 'top',
+                        dy: 7,
+                    });
+                }
+            }
         } else {
             ctx.fillStyle = '#5b6b7c';
             ctx.font = '12px sans-serif';
@@ -2649,12 +3986,43 @@
         return fromMaps instanceof Date && !Number.isNaN(fromMaps.getTime()) ? fromMaps : null;
     }
 
+    function clearDrawnProfile() {
+        if (resizeRaf) {
+            cancelAnimationFrame(resizeRaf);
+            resizeRaf = 0;
+        }
+        lastPlot = null;
+        lastHodoLayout = null;
+        lastPointerCss = null;
+        staticLayerCanvas = null;
+        staticLayerWidth = 0;
+        staticLayerHeight = 0;
+        hideHoverReadout();
+        renderHodographReadout(null);
+        if (tableBodyEl) {
+            tableBodyEl.innerHTML = '';
+        }
+        const canvas = canvasEl || document.getElementById('sounding-canvas');
+        if (!canvas) {
+            return;
+        }
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+            return;
+        }
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        const width = canvas.width;
+        canvas.width = width;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
     function resetSoundingLocationState() {
         lastValidTimeIso = null;
         lastProfile = null;
         lockedAxes = null;
         lockedHodo = null;
         resetViewExtents();
+        clearDrawnProfile();
     }
 
     async function ensurePointVisibleOnMaps(lat, lon) {
@@ -2749,6 +4117,8 @@
         lastValidTimeIso = validTimeIso;
 
         if (showLoading) {
+            lastProfile = null;
+            clearDrawnProfile();
             // Keep layout stable: grey the existing diagram and show a spinner overlay
             // instead of injecting status text that resizes the panel.
             if (metaEl && (!metaEl.textContent || metaEl.textContent.includes('balloon tool') || metaEl.textContent.includes('Click a map'))) {
@@ -2822,9 +4192,11 @@
             locationSelectEl.value = MAP_LOCATION_VALUE;
         }
         lastValidTimeIso = null;
+        lastProfile = null;
         lockedAxes = null;
         lockedHodo = null;
         resetViewExtents();
+        clearDrawnProfile();
         if (model != null) {
             setSelectedModel(model, { reload: false });
         }
@@ -2858,6 +4230,7 @@
 
     function close() {
         ensureUi();
+        closeHodographHelp();
         if (!panelEl) return;
         endResizeDrag();
         loadGeneration += 1;
@@ -2873,6 +4246,7 @@
         lastProfile = null;
         lastPlot = null;
         lastHodoLayout = null;
+        clearDrawnProfile();
         lastValidTimeIso = null;
         lastRequestedValidTime = null;
         lockedAxes = null;
@@ -2884,6 +4258,7 @@
         if (tableBodyEl) {
             tableBodyEl.innerHTML = '';
         }
+        renderHodographReadout(null);
         if (metaEl) {
             metaEl.textContent = toolEnabled
                 ? 'Click a map point to load a profile.'
@@ -2909,10 +4284,12 @@
         return { lat: pinLat, lon: pinLon };
     }
 
-    window.SoundingViewer = {
+        window.SoundingViewer = {
         openAt,
         close,
         isOpen,
+        isHelpOpen,
+        closeHelp: closeHodographHelp,
         getPinLocation,
         isToolEnabled,
         setToolEnabled,

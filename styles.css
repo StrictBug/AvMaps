@@ -1667,9 +1667,187 @@ body.sounding-resizing .image-panel img {
 }
 
 .sounding-view-stack.is-loading .sounding-canvas,
-.sounding-view-stack.is-loading .sounding-profile-table {
+.sounding-view-stack.is-loading .sounding-profile-table,
+.sounding-view-stack.is-loading .hodograph-readout {
     filter: grayscale(0.4) brightness(0.96);
     opacity: 0.55;
+}
+
+.hodograph-readout {
+    flex: 0 0 auto;
+    max-height: 36%;
+    min-height: 0;
+    margin-top: 8px;
+    padding: 8px 10px 6px;
+    overflow: auto;
+    border: 1px solid #d5dde8;
+    border-radius: 4px;
+    background: #f4f7fb;
+    color: #1f2a37;
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+.hodograph-readout.hidden {
+    display: none;
+}
+
+.hodograph-readout-section.hodograph-deferred,
+.hodograph-mode-row.hodograph-deferred {
+    display: none;
+}
+
+.hodograph-readout-section + .hodograph-readout-section {
+    margin-top: 7px;
+    padding-top: 6px;
+    border-top: 1px solid #e3e9f0;
+}
+
+.hodograph-readout-title {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin: 0 0 4px;
+}
+
+.hodograph-readout-section h3 {
+    margin: 0;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #5b6b7c;
+}
+
+.hodograph-help-btn {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    padding: 0;
+    border: 1px solid #5b6b7c;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.85);
+    color: #5b6b7c;
+    font: 700 10px/1 sans-serif;
+    cursor: pointer;
+}
+
+.hodograph-help-btn:hover {
+    background: #e8effd;
+    border-color: #2E5BBA;
+    color: #2E5BBA;
+}
+
+.hodo-help-card {
+    width: min(680px, calc(100vw - 40px));
+    max-height: min(82vh, 720px);
+    overflow: auto;
+}
+
+.hodo-help-note {
+    margin: 0 0 10px;
+    font-size: 13px;
+    line-height: 1.4;
+    color: #2e3d58;
+}
+
+.hodo-help-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    line-height: 1.35;
+    color: #2e3d58;
+}
+
+.hodo-help-table th,
+.hodo-help-table td {
+    padding: 6px 8px;
+    border: 1px solid #d5dde8;
+    text-align: left;
+    vertical-align: top;
+}
+
+.hodo-help-table thead th {
+    background: #eef3fb;
+    color: #173b88;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.hodo-help-table tbody th {
+    background: #f7f9fc;
+    color: #1f2a37;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.hodo-help-table tbody tr:nth-child(even) td {
+    background: #fbfcfe;
+}
+
+.hodograph-indices {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 2px 12px;
+    margin: 0;
+}
+
+.hodograph-indices div {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+}
+
+.hodograph-indices dt {
+    margin: 0;
+    color: #5b6b7c;
+}
+
+.hodograph-indices dd {
+    margin: 0;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.hodograph-mode-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 2px 12px;
+}
+
+.hodograph-mode-row .hodograph-flag-single {
+    margin: 0;
+}
+
+.hodograph-flag-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.hodograph-flag-single {
+    font-weight: 600;
+    color: #1f2a37;
+}
+
+.hodograph-flag-single.is-likely {
+    color: #9a3412;
+}
+
+.hodograph-flag-single.is-not-favoured {
+    color: #52606d;
+}
+
+.hodograph-flag-single.is-missing {
+    color: #9aa5b1;
 }
 
 .sounding-table-wrap {
@@ -1768,8 +1946,78 @@ body.sounding-resizing .image-panel img {
     cursor: crosshair;
 }
 
+.sounding-view-stack.is-hodograph .sounding-canvas {
+    width: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
+    object-fit: contain;
+}
+
 .sounding-canvas.is-panning {
     cursor: grabbing;
+}
+
+.hodograph-bunkers-legend {
+    position: absolute;
+    left: 10px;
+    bottom: 10px;
+    z-index: 4;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    box-sizing: border-box;
+    width: max-content;
+    min-width: 124px;
+    max-width: none;
+    height: max-content;
+    margin: 0;
+    padding: 4px 5px;
+    list-style: none;
+    border: 1px solid #d5dde8;
+    border-radius: 4px;
+    background: rgba(244, 247, 251, 0.94);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    overflow: visible;
+}
+
+.hodograph-bunkers-legend.hidden {
+    display: none;
+}
+
+.hodograph-bunkers-legend li {
+    display: block;
+}
+
+.hodograph-bunkers-legend button {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    box-sizing: border-box;
+    width: 100%;
+    margin: 0;
+    padding: 2px 0;
+    border: 0;
+    background: transparent;
+    color: #1f2a37;
+    font: 600 10px/1.3 sans-serif;
+    text-align: left;
+    white-space: nowrap;
+    cursor: pointer;
+    opacity: 0.42;
+}
+
+.hodograph-bunkers-legend button[aria-pressed="true"] {
+    opacity: 1;
+}
+
+.hodograph-bunkers-legend button:hover {
+    background: rgba(255, 255, 255, 0.7);
+}
+
+.hodograph-legend-swatch {
+    flex: 0 0 16px;
+    height: 2px;
+    background: var(--swatch, #1f2a37);
 }
 
 .sounding-hover {

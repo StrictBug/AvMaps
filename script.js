@@ -2212,6 +2212,12 @@ function setupEventListeners() {
             return;
         }
 
+        if (window.SoundingViewer?.isHelpOpen?.() && event.key === 'Escape') {
+            window.SoundingViewer.closeHelp();
+            event.preventDefault();
+            return;
+        }
+
         if (window.SoundingViewer?.isOpen?.() && event.key === 'Escape') {
             window.SoundingViewer.close();
             event.preventDefault();
