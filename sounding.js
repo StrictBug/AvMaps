@@ -2,6 +2,7 @@
     const PRESSURE_LEVELS_HPA = [
         1000, 975, 950, 925, 900, 850, 800, 700, 600, 500, 400, 300, 250, 200, 150, 100,
     ];
+    const HODO_MIN_PRESSURE_HPA = 300;
 
     const SOUNDING_MODELS = {
         gfs_seamless: {
@@ -222,6 +223,7 @@
                 renderActiveView(lastProfile);
             }
         });
+        renderHodographReadout(null);
     }
 
     function isVerticalLayout() {
@@ -1536,6 +1538,10 @@
             if (!key.startsWith('wind_speed_') || !Array.isArray(series)) {
                 return;
             }
+            const match = key.match(/^wind_speed_(\d+)hPa$/);
+            if (match && Number(match[1]) < HODO_MIN_PRESSURE_HPA) {
+                return;
+            }
             series.forEach((value) => {
                 if (Number.isFinite(value) && value > max) {
                     max = value;
@@ -2110,7 +2116,7 @@
         return (profile?.levels || [])
             .map((level) => {
                 const uv = windComponentsKt(level.windSpeedKt, level.windDirDeg);
-                if (!uv) {
+                if (!uv || (Number.isFinite(level.pressure) && level.pressure < HODO_MIN_PRESSURE_HPA)) {
                     return null;
                 }
                 return { ...level, u: uv.u, v: uv.v };
@@ -2146,7 +2152,7 @@
         return altitudeFt.toLocaleString('en-US');
     }
 
-    function pressureColor(pressure, pMin = 100, pMax = 1000) {
+    function pressureColor(pressure, pMin = HODO_MIN_PRESSURE_HPA, pMax = 1000) {
         const safeP = Math.min(Math.max(pressure, pMin), pMax);
         const t = (Math.log(safeP) - Math.log(pMin)) / (Math.log(pMax) - Math.log(pMin));
         const r = Math.round(29 + (214 - 29) * t);
@@ -3069,6 +3075,20 @@
         )).join('');
     }
 
+    function hodographIndexRows(diag) {
+        return [
+            { label: 'Shear 0–1km', value: formatShearKt(diag?.shear01) },
+            { label: 'Shear 0–6km', value: formatShearKt(diag?.shear06) },
+            { label: 'Bunkers L', value: formatWindDddSs(diag?.bunkers?.lm?.u, diag?.bunkers?.lm?.v) },
+            { label: 'Bunkers R', value: formatWindDddSs(diag?.bunkers?.rm?.u, diag?.bunkers?.rm?.v) },
+            { label: 'RM SRH 0–1km', value: Number.isFinite(diag?.srhRm01) ? `${formatSrh(diag.srhRm01)} m²/s²` : '—' },
+            { label: 'LM SRH 0–1km', value: Number.isFinite(diag?.srhLm01) ? `${formatSrh(diag.srhLm01)} m²/s²` : '—' },
+            { label: 'RM SRH 0–3km', value: Number.isFinite(diag?.srhRm03) ? `${formatSrh(diag.srhRm03)} m²/s²` : '—' },
+            { label: 'LM SRH 0–3km', value: Number.isFinite(diag?.srhLm03) ? `${formatSrh(diag.srhLm03)} m²/s²` : '—' },
+            { label: 'Crit. angle', value: formatAngleDeg(diag?.criticalAngle) },
+        ];
+    }
+
     function selectedStormMovementLabel(flags) {
         if (!flags || flags.splitting === '—') {
             return '—';
@@ -3103,24 +3123,14 @@
         if (!indicesEl || !stormModeEl || !stormMovementEl || !severeEl) {
             return;
         }
+        // Always keep the index rows so the panel does not grow when data arrives.
+        indicesEl.innerHTML = renderIndexItems(hodographIndexRows(diag));
         if (!diag) {
-            indicesEl.innerHTML = '';
             stormModeEl.textContent = '';
             stormMovementEl.textContent = '';
             severeEl.innerHTML = '';
             return;
         }
-        indicesEl.innerHTML = renderIndexItems([
-            { label: 'Shear 0–1km', value: formatShearKt(diag.shear01) },
-            { label: 'Shear 0–6km', value: formatShearKt(diag.shear06) },
-            { label: 'Bunkers L', value: formatWindDddSs(diag.bunkers?.lm?.u, diag.bunkers?.lm?.v) },
-            { label: 'Bunkers R', value: formatWindDddSs(diag.bunkers?.rm?.u, diag.bunkers?.rm?.v) },
-            { label: 'RM SRH 0–1km', value: Number.isFinite(diag.srhRm01) ? `${formatSrh(diag.srhRm01)} m²/s²` : '—' },
-            { label: 'LM SRH 0–1km', value: Number.isFinite(diag.srhLm01) ? `${formatSrh(diag.srhLm01)} m²/s²` : '—' },
-            { label: 'RM SRH 0–3km', value: Number.isFinite(diag.srhRm03) ? `${formatSrh(diag.srhRm03)} m²/s²` : '—' },
-            { label: 'LM SRH 0–3km', value: Number.isFinite(diag.srhLm03) ? `${formatSrh(diag.srhLm03)} m²/s²` : '—' },
-            { label: 'Crit. angle', value: formatAngleDeg(diag.criticalAngle) },
-        ]);
         stormModeEl.textContent = diag.stormMode || '—';
         stormMovementEl.textContent = selectedStormMovementLabel(diag.stormMovement);
         const severeItems = applicableSevereLabels(diag.severe);

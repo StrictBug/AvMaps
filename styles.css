@@ -1792,6 +1792,7 @@ body.sounding-resizing .image-panel img {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 2px 12px;
     margin: 0;
+    min-height: calc((1.35em + 2px) * 5);
 }
 
 .hodograph-indices div {

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Aviation map viewer</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="styles.css?v=hodo-legend-fit-5">
+    <link rel="stylesheet" href="styles.css?v=hodo-indices-size-1">
 </head>
 <body class="loading">
     <header>
@@ -172,7 +172,17 @@
                                     <h3>Indices</h3>
                                     <button type="button" class="hodograph-help-btn" data-hodo-help="indices" aria-label="About indices" title="About indices">?</button>
                                 </div>
-                                <dl id="hodograph-indices" class="hodograph-indices"></dl>
+                                <dl id="hodograph-indices" class="hodograph-indices">
+                                    <div><dt>Shear 0–1km</dt><dd>—</dd></div>
+                                    <div><dt>Shear 0–6km</dt><dd>—</dd></div>
+                                    <div><dt>Bunkers L</dt><dd>—</dd></div>
+                                    <div><dt>Bunkers R</dt><dd>—</dd></div>
+                                    <div><dt>RM SRH 0–1km</dt><dd>—</dd></div>
+                                    <div><dt>LM SRH 0–1km</dt><dd>—</dd></div>
+                                    <div><dt>RM SRH 0–3km</dt><dd>—</dd></div>
+                                    <div><dt>LM SRH 0–3km</dt><dd>—</dd></div>
+                                    <div><dt>Crit. angle</dt><dd>—</dd></div>
+                                </dl>
                             </section>
                             <section class="hodograph-readout-section hodograph-mode-row hodograph-deferred">
                                 <div>
@@ -338,7 +348,7 @@
             </div>
         </div>
 
-    <script src="sounding.js?v=hodo-clear-stale-2"></script>
+    <script src="sounding.js?v=hodo-indices-size-1"></script>
     <script src="script.js?v=hodo-help-1"></script>
 </body>
 </html>
