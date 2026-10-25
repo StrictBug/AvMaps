@@ -207,7 +207,7 @@ def latest_runs_are_ready(start_hour: int, end_hour: int, model: str) -> tuple[b
 def main() -> int:
     parser = argparse.ArgumentParser(description='Automatically update AvMaps when a fully available run is ready.')
     parser.add_argument('--model', choices=['gfs', 'icon', 'both'], default='both')
-    parser.add_argument('--start-hour', type=int, default=9)
+    parser.add_argument('--start-hour', type=int, default=6)
     parser.add_argument('--end-hour', type=int, default=48)
     parser.add_argument('--check-only', action='store_true', help='Only report readiness; do not generate maps.')
     parser.add_argument('--force', action='store_true', help='Generate even if the latest ready run already appears to be published.')

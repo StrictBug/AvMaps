@@ -3081,10 +3081,10 @@
             { label: 'Shear 0–6km', value: formatShearKt(diag?.shear06) },
             { label: 'Bunkers L', value: formatWindDddSs(diag?.bunkers?.lm?.u, diag?.bunkers?.lm?.v) },
             { label: 'Bunkers R', value: formatWindDddSs(diag?.bunkers?.rm?.u, diag?.bunkers?.rm?.v) },
-            { label: 'RM SRH 0–1km', value: Number.isFinite(diag?.srhRm01) ? `${formatSrh(diag.srhRm01)} m²/s²` : '—' },
             { label: 'LM SRH 0–1km', value: Number.isFinite(diag?.srhLm01) ? `${formatSrh(diag.srhLm01)} m²/s²` : '—' },
-            { label: 'RM SRH 0–3km', value: Number.isFinite(diag?.srhRm03) ? `${formatSrh(diag.srhRm03)} m²/s²` : '—' },
+            { label: 'RM SRH 0–1km', value: Number.isFinite(diag?.srhRm01) ? `${formatSrh(diag.srhRm01)} m²/s²` : '—' },
             { label: 'LM SRH 0–3km', value: Number.isFinite(diag?.srhLm03) ? `${formatSrh(diag.srhLm03)} m²/s²` : '—' },
+            { label: 'RM SRH 0–3km', value: Number.isFinite(diag?.srhRm03) ? `${formatSrh(diag.srhRm03)} m²/s²` : '—' },
             { label: 'Crit. angle', value: formatAngleDeg(diag?.criticalAngle) },
         ];
     }

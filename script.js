@@ -671,7 +671,7 @@ const FALLBACK_LEGENDS = {
 let currentCategory = 'BG';
 let currentDomain = 'AU';
 let currentFrame = 1;
-const DEFAULT_MAX_FRAMES = 40;
+const DEFAULT_MAX_FRAMES = 43;
 const DECODE_WINDOW_RADIUS = 15;
 const PRELOAD_CONCURRENCY = 8;
 let maxFrames = DEFAULT_MAX_FRAMES;
@@ -1872,12 +1872,14 @@ function lonLatToImageOffsets(img, lon, lat, domainId = currentDomain) {
 }
 
 function defaultSoundingModelForMapImage(img) {
-    // RHS column is ICON for every category (BG right; quad topRight/bottomRight).
-    const panel = img?.getAttribute?.('data-panel') || img?.closest?.('.image-panel')?.getAttribute('data-panel');
-    if (panel === 'topRight' || panel === 'bottomRight') {
+    // Rows are models: GFS on top, ICON below (pair and quad).
+    const panelEl = img?.closest?.('.image-panel') || img;
+    const row = panelEl?.getAttribute?.('data-row') || img?.getAttribute?.('data-row');
+    if (row === '1') {
         return 'icon';
     }
-    if (img?.id === 'right-image') {
+    const panel = img?.getAttribute?.('data-panel') || panelEl?.getAttribute?.('data-panel');
+    if (panel === 'bottomLeft' || panel === 'bottomRight') {
         return 'icon';
     }
     return 'gfs';

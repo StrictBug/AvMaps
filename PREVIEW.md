@@ -18,4 +18,4 @@ gh workflow run auto-update-maps.yml --ref main -f force=true
 gh run watch
 ```
 
-A full generate (hours 9–48, GFS+ICON) can take on the order of 1–2 hours.
+A full generate (hours 6–48, GFS+ICON) can take on the order of 1–2 hours.
