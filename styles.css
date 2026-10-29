@@ -485,6 +485,7 @@ body.sounding-panel-open .sounding-panel {
     pointer-events: none;
     display: none;
     z-index: 2;
+    image-rendering: auto;
 }
 
 body.policy-mode .policy-overlay {
@@ -544,15 +545,55 @@ body.policy-mode .policy-layers-panel {
     display: flex;
     align-items: center;
     gap: 8px;
-    cursor: pointer;
+    cursor: grab;
     text-align: left;
     width: 100%;
     line-height: 1.25;
+    touch-action: none;
+    user-select: none;
 }
 
 .policy-layer-toggle:hover {
     background: #e8effd;
     border-color: #8aa6d8;
+}
+
+.policy-layer-toggle:active,
+.policy-layer-toggle.is-dragging,
+body.policy-layer-dragging .policy-layer-toggle {
+    cursor: grabbing;
+}
+
+.policy-layer-grip {
+    flex: 0 0 8px;
+    width: 8px;
+    height: 14px;
+    background-image: radial-gradient(#5a7ab0 1.15px, transparent 1.25px);
+    background-size: 4px 4.5px;
+    background-position: 0 0;
+    background-repeat: repeat;
+    opacity: 0.55;
+}
+
+.policy-layer-toggle.is-dragging {
+    position: fixed;
+    z-index: 40;
+    margin: 0;
+    pointer-events: none;
+    box-shadow: 0 10px 22px rgba(28, 49, 89, 0.28);
+}
+
+.policy-layer-placeholder {
+    border: 1px dashed #8aa6d8;
+    background: #e8effd;
+    border-radius: 6px;
+    min-height: 28px;
+    box-sizing: border-box;
+}
+
+body.policy-layer-dragging {
+    cursor: grabbing;
+    user-select: none;
 }
 
 .policy-layer-toggle.is-off {

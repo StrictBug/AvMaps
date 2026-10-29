@@ -146,9 +146,9 @@ LEGEND_CONFIG = {
                     'label': 'Fog',
                     'units': 'category',
                     'items': [
-                        {'color': '#ff0000', 'label': 'F1'},
+                        {'color': '#ffff00', 'label': 'F1'},
                         {'color': '#ffaa7f', 'label': 'F2'},
-                        {'color': '#ffff00', 'label': 'F3'},
+                        {'color': '#ff0000', 'label': 'F3'},
                     ],
                 },
             ],
@@ -195,9 +195,9 @@ LEGEND_CONFIG = {
                     'label': 'Fog',
                     'units': 'category',
                     'items': [
-                        {'color': '#ff0000', 'label': 'F1'},
+                        {'color': '#ffff00', 'label': 'F1'},
                         {'color': '#ffaa7f', 'label': 'F2'},
-                        {'color': '#ffff00', 'label': 'F3'},
+                        {'color': '#ff0000', 'label': 'F3'},
                     ],
                 },
             ],
@@ -310,9 +310,9 @@ LEGEND_CONFIG = {
                     'label': 'Freezing fog',
                     'units': 'category',
                     'items': [
-                        {'color': '#ff0000', 'label': 'F1'},
-                        {'color': '#ffaa7f', 'label': 'F2'},
-                        {'color': '#ffff00', 'label': 'F3'},
+                        {'color': '#8fb8ff', 'label': 'F1'},
+                        {'color': '#4d74e8', 'label': 'F2'},
+                        {'color': '#1f3a9a', 'label': 'F3'},
                     ],
                 },
             ],
@@ -399,6 +399,35 @@ LEGEND_CONFIG = {
                     ],
                 },
                 {
+                    'id': 'icing',
+                    'label': 'Icing blw 10000ft',
+                    'units': '%',
+                    'items': [
+                        {'color': '#00ccff', 'label': '95-97.5'},
+                        {'color': '#00ffff', 'label': '97.5-100'},
+                    ],
+                },
+                {
+                    'id': 'fog',
+                    'label': 'Fog',
+                    'units': 'category',
+                    'items': [
+                        {'color': '#ffff00', 'label': 'F1'},
+                        {'color': '#ffaa7f', 'label': 'F2'},
+                        {'color': '#ff0000', 'label': 'F3'},
+                    ],
+                },
+                {
+                    'id': 'freezing_fog',
+                    'label': 'Freezing fog',
+                    'units': 'category',
+                    'items': [
+                        {'color': '#8fb8ff', 'label': 'F1'},
+                        {'color': '#4d74e8', 'label': 'F2'},
+                        {'color': '#1f3a9a', 'label': 'F3'},
+                    ],
+                },
+                {
                     'id': 'low_cloud',
                     'label': 'Low cloud',
                     'units': 'max RH %',
@@ -416,47 +445,6 @@ LEGEND_CONFIG = {
                     'items': [{'color': '#00ff00', 'label': '95-100'}],
                 },
                 {
-                    'id': 'fog',
-                    'label': 'Fog',
-                    'units': 'category',
-                    'items': [
-                        {'color': '#ff0000', 'label': 'F1'},
-                        {'color': '#ffaa7f', 'label': 'F2'},
-                        {'color': '#ffff00', 'label': 'F3'},
-                    ],
-                },
-                {
-                    'id': 'ts_precip',
-                    'label': 'Thunderstorm precipitation',
-                    'units': 'mm',
-                    'items': [
-                        {'color': '#00ff00', 'label': '0.1-0.3'},
-                        {'color': '#fffb00', 'label': '0.5-1'},
-                        {'color': '#ff9900', 'label': '5-7.5'},
-                        {'color': '#ff0000', 'label': '15-20'},
-                        {'color': '#ff20d6', 'label': '40-45'},
-                        {'color': '#1c14ff', 'label': '100-300'},
-                    ],
-                },
-                {
-                    'id': 'icing',
-                    'label': 'Icing',
-                    'units': '%',
-                    'items': [
-                        {'color': '#00ccff', 'label': '95-97.5'},
-                        {'color': '#00ffff', 'label': '97.5-100'},
-                    ],
-                },
-                {
-                    'id': 'thermals',
-                    'label': 'Thermals',
-                    'units': 'ft AGL',
-                    'items': [
-                        {'color': '#ffcc00', 'label': '6000-10000'},
-                        {'color': '#ff6600', 'label': '10000+'},
-                    ],
-                },
-                {
                     'id': 'small_hail',
                     'label': 'Small hail',
                     'units': 'mm',
@@ -465,16 +453,6 @@ LEGEND_CONFIG = {
                         {'color': '#4dd0e1', 'label': '2.5-5'},
                         {'color': '#006064', 'label': '20-40'},
                         {'color': '#00363a', 'label': '40+'},
-                    ],
-                },
-                {
-                    'id': 'freezing_fog',
-                    'label': 'Freezing fog',
-                    'units': 'category',
-                    'items': [
-                        {'color': '#ff0000', 'label': 'F1'},
-                        {'color': '#ffaa7f', 'label': 'F2'},
-                        {'color': '#ffff00', 'label': 'F3'},
                     ],
                 },
                 {
@@ -488,8 +466,31 @@ LEGEND_CONFIG = {
                     ],
                 },
                 {
-                    'id': 'shear_lee',
-                    'label': 'Shear and lee turbulence',
+                    'id': 'ts_precip',
+                    'label': 'Thunderstorms',
+                    'units': 'mm',
+                    'items': [
+                        {'color': '#00ff00', 'label': '0.1-0.3'},
+                        {'color': '#fffb00', 'label': '0.5-1'},
+                        {'color': '#ff9900', 'label': '5-7.5'},
+                        {'color': '#ff0000', 'label': '15-20'},
+                        {'color': '#ff20d6', 'label': '40-45'},
+                        {'color': '#1c14ff', 'label': '100-300'},
+                    ],
+                },
+                {
+                    'id': 'shear',
+                    'label': 'Shear turbulence',
+                    'units': 'category',
+                    'items': [
+                        {'color': '#ffcc00', 'label': 'MOD'},
+                        {'color': '#ff6600', 'label': 'MOD/SEV'},
+                        {'color': '#ff0000', 'label': 'SEV'},
+                    ],
+                },
+                {
+                    'id': 'lee',
+                    'label': 'Lee turbulence',
                     'units': 'category',
                     'items': [
                         {'color': '#ffcc00', 'label': 'MOD'},
@@ -505,6 +506,15 @@ LEGEND_CONFIG = {
                         {'color': '#ff9900', 'label': '0.2-0.4'},
                         {'color': '#ff0000', 'label': '0.4-0.6'},
                         {'color': '#ff00ff', 'label': '0.6+'},
+                    ],
+                },
+                {
+                    'id': 'thermals',
+                    'label': 'Thermals',
+                    'units': 'ft AGL',
+                    'items': [
+                        {'color': '#ffcc00', 'label': '6000-10000'},
+                        {'color': '#ff6600', 'label': '10000+'},
                     ],
                 },
             ],
@@ -537,7 +547,8 @@ POLICY_LAYER_SPECS = (
     {'id': 'small_hail', 'dtype': 'f16', 'reduce': 'sum', 'groups': ('airmass_fzl',)},
     {'id': 'freezing_fog', 'dtype': 'u8', 'reduce': 'max', 'groups': ('airmass_fzl',)},
     {'id': 'snow', 'dtype': 'f16', 'reduce': 'sum', 'groups': ('airmass_snow',)},
-    {'id': 'shear_lee', 'dtype': 'u8', 'reduce': 'max', 'groups': ('turb_wind',)},
+    {'id': 'shear', 'dtype': 'u8', 'reduce': 'max', 'groups': ('turb_wind',)},
+    {'id': 'lee', 'dtype': 'u8', 'reduce': 'max', 'groups': ('turb_wind',)},
     {'id': 'mtw', 'dtype': 'f16', 'reduce': 'max', 'groups': ('turb_mtw',)},
 )
 POLICY_U8_MISSING = 255
@@ -1949,12 +1960,39 @@ def calculate_ts_precipitation_1h(data):
     return np.where(ts_mask & (convective >= 0.1), convective, np.nan)
 
 
+POLICY_ICING_MAX_HEIGHT_FT = 10000.0
+
+
 def calculate_policy_icing_rh(data):
-    icing_rh = calculate_icing_relative_humidity(data)
+    """Icing RH below 10000 ft AMSL for one timestep.
+
+    Uses the 0C to -15C icing layer, but only on isobaric levels below 10000 ft
+    and only where the freezing level itself is below 10000 ft. The viewer then
+    takes the maximum of this field over the selected accumulation period.
+    """
+    temp_isobaric_c = get_time_index(data['Temperature_isobaric']).values - 273.15
+    rh_isobaric = get_time_index(data['Relative_humidity_isobaric']).values
+    hgt_isobaric_ft = np.asarray(get_time_index(data['Geopotential_height_isobaric']).values, dtype=float) * 3.28084
+
+    in_icing_below = (
+        (temp_isobaric_c <= 0.0)
+        & (temp_isobaric_c >= -15.0)
+        & (hgt_isobaric_ft < POLICY_ICING_MAX_HEIGHT_FT)
+        & np.isfinite(rh_isobaric)
+        & np.isfinite(hgt_isobaric_ft)
+    )
+    rh_sum = np.sum(np.where(in_icing_below, rh_isobaric, 0.0), axis=0)
+    rh_count = np.sum(in_icing_below, axis=0)
+    mean_rh = np.full(rh_sum.shape, np.nan, dtype=float)
+    valid = rh_count > 0
+    mean_rh[valid] = rh_sum[valid] / rh_count[valid]
+
     freezing_level_ft = calculate_freezing_level_height_ft(data)
     return np.where(
-        np.isfinite(icing_rh) & np.isfinite(freezing_level_ft) & (freezing_level_ft < 10000.0),
-        icing_rh,
+        np.isfinite(mean_rh)
+        & np.isfinite(freezing_level_ft)
+        & (freezing_level_ft < POLICY_ICING_MAX_HEIGHT_FT),
+        mean_rh,
         np.nan,
     )
 
@@ -1973,12 +2011,6 @@ def calculate_freezing_fog_category(data):
     fog = calculate_fog_category(data)
     temp_2m = get_time_index(data['Temperature_height_above_ground'].sel(height_above_ground3=2)).values - 273.15
     return np.where(temp_2m < 0.0, fog, 0).astype(np.uint8)
-
-
-def calculate_shear_lee_category(data):
-    shear = calculate_shear_turbulence_category(data)
-    lee = calculate_lee_turbulence_category(data)
-    return np.maximum(shear, lee)
 
 
 def extract_policy_fields(data, groups):
@@ -2010,7 +2042,8 @@ def extract_policy_fields(data, groups):
     if 'airmass_snow' in wanted:
         _try('snow', calculate_snow_precipitation_1h)
     if 'turb_wind' in wanted:
-        _try('shear_lee', calculate_shear_lee_category)
+        _try('shear', calculate_shear_turbulence_category)
+        _try('lee', calculate_lee_turbulence_category)
     if 'turb_mtw' in wanted:
         _try('mtw', calculate_mountain_wave_intensity)
     return extracted
@@ -3953,7 +3986,7 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         print(f"Fog grid points - F1: {np.sum(fog == 1)}, F2: {np.sum(fog == 2)}, F3: {np.sum(fog == 3)}")
 
         fog_masked = np.ma.masked_where(fog == 0, fog)
-        fog_cmap = ListedColormap(['#ff0000', '#ffaa7f', '#ffff00'])
+        fog_cmap = ListedColormap(['#ffff00', '#ffaa7f', '#ff0000'])
         fog_levels = [0.5, 1.5, 2.5, 3.5]
         fog_norm = BoundaryNorm(fog_levels, fog_cmap.N, clip=True)
 
@@ -3987,17 +4020,17 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         )
 
         freezing_fog_masked = np.ma.masked_where(freezing_fog == 0, freezing_fog)
-        fog_cmap = ListedColormap(['#ff0000', '#ffaa7f', '#ffff00'])
+        freeze_cmap = ListedColormap(['#8fb8ff', '#4d74e8', '#1f3a9a'])
         fog_levels = [0.5, 1.5, 2.5, 3.5]
-        fog_norm = BoundaryNorm(fog_levels, fog_cmap.N, clip=True)
+        freeze_norm = BoundaryNorm(fog_levels, freeze_cmap.N, clip=True)
 
         ax.contourf(
             data.longitude,
             data.latitude,
             freezing_fog_masked,
             levels=fog_levels,
-            cmap=fog_cmap,
-            norm=fog_norm,
+            cmap=freeze_cmap,
+            norm=freeze_norm,
             alpha=1.0,
             transform=ccrs.PlateCarree(),
             zorder=7.2,
@@ -4243,21 +4276,23 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         
         print(f"Removed {len(text_objects) - len(points_to_keep)} TAF points with labels outside domain")
 
-    # Add day/night terminator and night shading above all other layers
-    valid_time = init_time + timedelta(hours=forecast_hour)
-    cos_zenith, night_mask = get_day_night_grid(valid_time, data.longitude.values, data.latitude.values)
-    print(f"Night grid points: {np.sum(night_mask)} out of {night_mask.size}")
+    # Add day/night terminator and night shading above all other layers.
+    # Skip it on Policy bases so overlay colours are not shifted by the night wash.
+    if not policy_base_profile:
+        valid_time = init_time + timedelta(hours=forecast_hour)
+        cos_zenith, night_mask = get_day_night_grid(valid_time, data.longitude.values, data.latitude.values)
+        print(f"Night grid points: {np.sum(night_mask)} out of {night_mask.size}")
 
-    night_overlay = np.where(night_mask, 1.0, np.nan)
-    ax.contourf(
-        data.longitude,
-        data.latitude,
-        night_overlay,
-        levels=[0.5, 1.5],
-        colors=[(0.5, 0.5, 0.5, 0.3)],
-        transform=ccrs.PlateCarree(),
-        zorder=300,
-    )
+        night_overlay = np.where(night_mask, 1.0, np.nan)
+        ax.contourf(
+            data.longitude,
+            data.latitude,
+            night_overlay,
+            levels=[0.5, 1.5],
+            colors=[(0.5, 0.5, 0.5, 0.3)],
+            transform=ccrs.PlateCarree(),
+            zorder=300,
+        )
     
     # Product / model / run / valid labels are shown in the viewer table chrome
     # so the rendered map can use the full figure for geography.
@@ -5317,7 +5352,11 @@ def generate_policy_fixture(forecast_hours=None, domain_ids=None):
             shear = np.zeros((nlat, nlon), dtype=np.float32)
             shear_blob = _policy_fixture_blob(nlat, nlon, lats, lons, hour, -35.5 + lat_offset, 141.0, 2.4, 2.0)
             shear[np.isfinite(shear_blob)] = 2
-            hour_entry['shear_lee'] = shear
+            hour_entry['shear'] = shear
+            lee = np.zeros((nlat, nlon), dtype=np.float32)
+            lee_blob = _policy_fixture_blob(nlat, nlon, lats, lons, hour, -36.4 + lat_offset, 148.4, 1.8, 2.0)
+            lee[np.isfinite(lee_blob)] = 2
+            hour_entry['lee'] = lee
             hour_entry['mtw'] = _policy_fixture_blob(nlat, nlon, lats, lons, hour, -36.2 + lat_offset, 148.5, 1.5, 0.5)
             POLICY_CACHE[model_key]['hours'][hour] = hour_entry
 

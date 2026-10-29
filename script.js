@@ -106,26 +106,40 @@ const PRECIP_LEGEND = {
 const FOG_LEGEND = {
     units: 'category',
     items: [
-        { color: '#ff0000', label: 'F1' },
+        { color: '#ffff00', label: 'F1' },
         { color: '#ffaa7f', label: 'F2' },
-        { color: '#ffff00', label: 'F3' },
+        { color: '#ff0000', label: 'F3' },
     ],
 };
 
+const FREEZING_FOG_LEGEND = {
+    units: 'category',
+    items: [
+        { color: '#8fb8ff', label: 'F1' },
+        { color: '#4d74e8', label: 'F2' },
+        { color: '#1f3a9a', label: 'F3' },
+    ],
+};
+
+// Paint order is bottom → top. The layer list uses the same order (top of list = bottom layer).
+const POLICY_OVERLAY_ALPHA = 0.72;
 const POLICY_LAYER_RENDER = [
-    { id: 'low_cloud', reduce: 'max', alpha: 150, edges: [85, 90, 95, 97.5, 100], colors: ['#ffffff', '#c86400', '#aa5500', '#6d3600'] },
-    { id: 'drizzle', reduce: 'max', alpha: 150, edges: [95, 100], colors: ['#00ff00'] },
-    { id: 'fog', reduce: 'max', alpha: 160, discrete: true, colors: { 1: '#ff0000', 2: '#ffaa7f', 3: '#ffff00' } },
-    { id: 'freezing_fog', reduce: 'max', alpha: 180, discrete: true, colors: { 1: '#ff0000', 2: '#ffaa7f', 3: '#ffff00' } },
-    { id: 'icing', reduce: 'max', alpha: 180, edges: [95, 97.5, 100], colors: ['#00ccff', '#00ffff'] },
-    { id: 'thermals', reduce: 'max', alpha: 170, edges: [6000, 10000, 20000], colors: ['#ffcc00', '#ff6600'] },
-    { id: 'precip', reduce: 'sum', alpha: 160, edges: [0.1, 0.2, 0.5, 1, 2, 5, 7.5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 1e9], colors: ['#f0ff96', '#f0ff3c', '#ffff00', '#c8ff00', '#96ff00', '#009600', '#00af80', '#00c8ff', '#0096ff', '#0000ff', '#0000ff', '#ff6400', '#ff3200', '#ff0000', '#c80000', '#320000'] },
-    { id: 'snow', reduce: 'sum', alpha: 190, edges: [0.1, 0.2, 0.5, 1, 2, 4, 8, 1e9], colors: ['#00b7ff', '#2cc7ff', '#54d6ff', '#7ee3ff', '#a8eeff', '#cdf6ff', '#ffffff'] },
-    { id: 'small_hail', reduce: 'sum', alpha: 180, edges: [0.1, 0.5, 1, 2.5, 5, 10, 20, 40, 1e9], colors: ['#e0f7fa', '#b2ebf2', '#80deea', '#4dd0e1', '#00bcd4', '#0097a7', '#006064', '#00363a'] },
-    { id: 'ts_precip', reduce: 'sum', alpha: 200, edges: [0.1, 0.3, 0.5, 1, 2.5, 5, 7.5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 100, 300, 1e9], colors: ['#00ff00', '#80ff00', '#fffb00', '#fff000', '#ffda00', '#ff9900', '#ff7300', '#ff4c00', '#ff0000', '#ff206e', '#ff2079', '#ff229f', '#ff1eb8', '#ff20d6', '#ec20ff', '#c020ff', '#9021ff', '#651dff', '#1c14ff', '#0effeb'] },
-    { id: 'shear_lee', reduce: 'max', alpha: 200, discrete: true, colors: { 1: '#ffcc00', 2: '#ff6600', 3: '#ff0000' } },
-    { id: 'mtw', reduce: 'max', alpha: 200, edges: [0.2, 0.4, 0.6, 1e9], colors: ['#ff9900', '#ff0000', '#ff00ff'] },
+    { id: 'precip', reduce: 'sum', edges: [0.1, 0.2, 0.5, 1, 2, 5, 7.5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 1e9], colors: ['#f0ff96', '#f0ff3c', '#ffff00', '#c8ff00', '#96ff00', '#009600', '#00af80', '#00c8ff', '#0096ff', '#0000ff', '#0000ff', '#ff6400', '#ff3200', '#ff0000', '#c80000', '#320000'] },
+    { id: 'icing', reduce: 'max', edges: [95, 97.5, 100], colors: ['#00ccff', '#00ffff'] },
+    { id: 'fog', reduce: 'max', discrete: true, colors: { 1: '#ffff00', 2: '#ffaa7f', 3: '#ff0000' } },
+    { id: 'freezing_fog', reduce: 'max', discrete: true, colors: { 1: '#8fb8ff', 2: '#4d74e8', 3: '#1f3a9a' } },
+    { id: 'low_cloud', reduce: 'max', edges: [85, 90, 95, 97.5, 100], colors: ['#ffffff', '#c86400', '#aa5500', '#6d3600'] },
+    { id: 'drizzle', reduce: 'max', edges: [95, 100], colors: ['#00ff00'] },
+    { id: 'small_hail', reduce: 'sum', edges: [0.1, 0.5, 1, 2.5, 5, 10, 20, 40, 1e9], colors: ['#e0f7fa', '#b2ebf2', '#80deea', '#4dd0e1', '#00bcd4', '#0097a7', '#006064', '#00363a'] },
+    { id: 'snow', reduce: 'sum', edges: [0.1, 0.2, 0.5, 1, 2, 4, 8, 1e9], colors: ['#00b7ff', '#2cc7ff', '#54d6ff', '#7ee3ff', '#a8eeff', '#cdf6ff', '#ffffff'] },
+    { id: 'ts_precip', reduce: 'sum', edges: [0.1, 0.3, 0.5, 1, 2.5, 5, 7.5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 100, 300, 1e9], colors: ['#00ff00', '#80ff00', '#fffb00', '#fff000', '#ffda00', '#ff9900', '#ff7300', '#ff4c00', '#ff0000', '#ff206e', '#ff2079', '#ff229f', '#ff1eb8', '#ff20d6', '#ec20ff', '#c020ff', '#9021ff', '#651dff', '#1c14ff', '#0effeb'] },
+    { id: 'shear', reduce: 'max', discrete: true, colors: { 1: '#ffcc00', 2: '#ff6600', 3: '#ff0000' } },
+    { id: 'lee', reduce: 'max', discrete: true, colors: { 1: '#ffcc00', 2: '#ff6600', 3: '#ff0000' } },
+    { id: 'mtw', reduce: 'max', edges: [0.2, 0.4, 0.6, 1e9], colors: ['#ff9900', '#ff0000', '#ff00ff'] },
+    { id: 'thermals', reduce: 'max', edges: [6000, 10000, 20000], colors: ['#ffcc00', '#ff6600'] },
 ];
+const DEFAULT_POLICY_LAYER_ORDER = POLICY_LAYER_RENDER.map((spec) => spec.id);
+const POLICY_LAYER_DRAG_THRESHOLD = 6;
 
 const LAYER_LOGIC = {
     BG: {
@@ -334,7 +348,7 @@ const LAYER_LOGIC = {
                 {
                     name: 'Freezing fog',
                     math: String.raw`\text{Fog where }T_{2\mathrm{m}}<0^{\circ}\mathrm{C}`,
-                    legend: FOG_LEGEND,
+                    legend: FREEZING_FOG_LEGEND,
                 },
             ],
         },
@@ -446,6 +460,27 @@ const LAYER_LOGIC = {
                     legend: { units: 'mm', items: PRECIP_LEGEND.items },
                 },
                 {
+                    name: 'Icing below 10000ft',
+                    math: String.raw`\mathrm{Max}\big(\text{Icing}\mid \mathrm{FZL}<10000\,\mathrm{ft}\big)_{t_0-t}`,
+                    legend: {
+                        units: '%',
+                        items: [
+                            { color: '#00ccff', label: '95–97.5' },
+                            { color: '#00ffff', label: '97.5–100' },
+                        ],
+                    },
+                },
+                {
+                    name: 'Fog',
+                    math: String.raw`\mathrm{Max}(\text{Fog})_{t_0-t}`,
+                    legend: FOG_LEGEND,
+                },
+                {
+                    name: 'Freezing fog',
+                    math: String.raw`\mathrm{Max}(\text{Freezing fog})_{t_0-t}`,
+                    legend: FREEZING_FOG_LEGEND,
+                },
+                {
                     name: 'Low cloud',
                     math: String.raw`\mathrm{Max}(\text{Low cloud})_{t_0-t}`,
                     legend: {
@@ -467,48 +502,6 @@ const LAYER_LOGIC = {
                     },
                 },
                 {
-                    name: 'Fog',
-                    math: String.raw`\mathrm{Max}(\text{Fog})_{t_0-t}`,
-                    legend: FOG_LEGEND,
-                },
-                {
-                    name: 'Thunderstorm precipitation',
-                    math: String.raw`\sum_{t_0}^{t}(\text{Thunderstorm precipitation})`,
-                    legend: {
-                        units: 'mm',
-                        items: [
-                            { color: '#00ff00', label: '0.1–0.3' },
-                            { color: '#fffb00', label: '0.5–1' },
-                            { color: '#ff9900', label: '5–7.5' },
-                            { color: '#ff0000', label: '15–20' },
-                            { color: '#ff20d6', label: '40–45' },
-                            { color: '#1c14ff', label: '100–300' },
-                        ],
-                    },
-                },
-                {
-                    name: 'Icing',
-                    math: String.raw`\mathrm{Max}(\text{Icing blw 10000ft})_{t_0-t}`,
-                    legend: {
-                        units: '%',
-                        items: [
-                            { color: '#00ccff', label: '95–97.5' },
-                            { color: '#00ffff', label: '97.5–100' },
-                        ],
-                    },
-                },
-                {
-                    name: 'Thermals',
-                    math: String.raw`\mathrm{Max}(\text{Thermals})_{t_0-t}`,
-                    legend: {
-                        units: 'ft AGL',
-                        items: [
-                            { color: '#ffcc00', label: '6000–10000' },
-                            { color: '#ff6600', label: '10000+' },
-                        ],
-                    },
-                },
-                {
                     name: 'Small hail',
                     math: String.raw`\sum_{t_0}^{t}(\text{Small hail})`,
                     legend: {
@@ -520,11 +513,6 @@ const LAYER_LOGIC = {
                             { color: '#00363a', label: '40+' },
                         ],
                     },
-                },
-                {
-                    name: 'Freezing fog',
-                    math: String.raw`\mathrm{Max}(\text{Freezing fog})_{t_0-t}`,
-                    legend: FOG_LEGEND,
                 },
                 {
                     name: 'Snow',
@@ -539,8 +527,35 @@ const LAYER_LOGIC = {
                     },
                 },
                 {
-                    name: 'Shear and lee turbulence',
-                    math: String.raw`\mathrm{Max}(\text{Shear and lee turbulence})_{t_0-t}`,
+                    name: 'Thunderstorms',
+                    math: String.raw`\sum_{t_0}^{t}(\text{Thunderstorms})`,
+                    legend: {
+                        units: 'mm',
+                        items: [
+                            { color: '#00ff00', label: '0.1–0.3' },
+                            { color: '#fffb00', label: '0.5–1' },
+                            { color: '#ff9900', label: '5–7.5' },
+                            { color: '#ff0000', label: '15–20' },
+                            { color: '#ff20d6', label: '40–45' },
+                            { color: '#1c14ff', label: '100–300' },
+                        ],
+                    },
+                },
+                {
+                    name: 'Shear turbulence',
+                    math: String.raw`\mathrm{Max}(\text{Shear turbulence})_{t_0-t}`,
+                    legend: {
+                        units: 'category',
+                        items: [
+                            { color: '#ffcc00', label: 'MOD' },
+                            { color: '#ff6600', label: 'MOD/SEV' },
+                            { color: '#ff0000', label: 'SEV' },
+                        ],
+                    },
+                },
+                {
+                    name: 'Lee turbulence',
+                    math: String.raw`\mathrm{Max}(\text{Lee turbulence})_{t_0-t}`,
                     legend: {
                         units: 'category',
                         items: [
@@ -559,6 +574,17 @@ const LAYER_LOGIC = {
                             { color: '#ff9900', label: '0.2–0.4' },
                             { color: '#ff0000', label: '0.4–0.6' },
                             { color: '#ff00ff', label: '0.6+' },
+                        ],
+                    },
+                },
+                {
+                    name: 'Thermals',
+                    math: String.raw`\mathrm{Max}(\text{Thermals})_{t_0-t}`,
+                    legend: {
+                        units: 'ft AGL',
+                        items: [
+                            { color: '#ffcc00', label: '6000–10000' },
+                            { color: '#ff6600', label: '10000+' },
                         ],
                     },
                 },
@@ -933,11 +959,7 @@ const FALLBACK_LEGENDS = {
                     id: 'bg-fog',
                     label: 'Fog',
                     units: 'category',
-                    items: [
-                        { color: '#ff0000', label: 'F1' },
-                        { color: '#ffaa7f', label: 'F2' },
-                        { color: '#ffff00', label: 'F3' },
-                    ],
+                    items: FOG_LEGEND.items,
                 },
             ],
         },
@@ -982,11 +1004,7 @@ const FALLBACK_LEGENDS = {
                     id: 'icon-bg-fog',
                     label: 'Fog',
                     units: 'category',
-                    items: [
-                        { color: '#ff0000', label: 'F1' },
-                        { color: '#ffaa7f', label: 'F2' },
-                        { color: '#ffff00', label: 'F3' },
-                    ],
+                    items: FOG_LEGEND.items,
                 },
             ],
         },
@@ -1097,11 +1115,7 @@ const FALLBACK_LEGENDS = {
                     id: 'airmass-fzl-freezing-fog',
                     label: 'Freezing fog',
                     units: 'category',
-                    items: [
-                        { color: '#ff0000', label: 'F1' },
-                        { color: '#ffaa7f', label: 'F2' },
-                        { color: '#ffff00', label: 'F3' },
-                    ],
+                    items: FREEZING_FOG_LEGEND.items,
                 },
             ],
         },
@@ -1173,6 +1187,17 @@ const FALLBACK_LEGENDS = {
             fields: [
                 { id: 'precip', label: 'Precipitation', units: 'mm', items: PRECIP_LEGEND.items },
                 {
+                    id: 'icing',
+                    label: 'Icing blw 10000ft',
+                    units: '%',
+                    items: [
+                        { color: '#00ccff', label: '95-97.5' },
+                        { color: '#00ffff', label: '97.5-100' },
+                    ],
+                },
+                { id: 'fog', label: 'Fog', units: 'category', items: FOG_LEGEND.items },
+                { id: 'freezing_fog', label: 'Freezing fog', units: 'category', items: FREEZING_FOG_LEGEND.items },
+                {
                     id: 'low_cloud',
                     label: 'Low cloud',
                     units: 'max RH %',
@@ -1184,36 +1209,6 @@ const FALLBACK_LEGENDS = {
                     ],
                 },
                 { id: 'drizzle', label: 'Drizzle', units: 'avg RH %', items: [{ color: '#00ff00', label: '95-100' }] },
-                { id: 'fog', label: 'Fog', units: 'category', items: FOG_LEGEND.items },
-                {
-                    id: 'ts_precip',
-                    label: 'Thunderstorm precipitation',
-                    units: 'mm',
-                    items: [
-                        { color: '#00ff00', label: '0.1-0.3' },
-                        { color: '#fffb00', label: '0.5-1' },
-                        { color: '#ff9900', label: '5-7.5' },
-                        { color: '#ff0000', label: '15-20' },
-                    ],
-                },
-                {
-                    id: 'icing',
-                    label: 'Icing',
-                    units: '%',
-                    items: [
-                        { color: '#00ccff', label: '95-97.5' },
-                        { color: '#00ffff', label: '97.5-100' },
-                    ],
-                },
-                {
-                    id: 'thermals',
-                    label: 'Thermals',
-                    units: 'ft AGL',
-                    items: [
-                        { color: '#ffcc00', label: '6000-10000' },
-                        { color: '#ff6600', label: '10000+' },
-                    ],
-                },
                 {
                     id: 'small_hail',
                     label: 'Small hail',
@@ -1223,7 +1218,6 @@ const FALLBACK_LEGENDS = {
                         { color: '#006064', label: '20-40' },
                     ],
                 },
-                { id: 'freezing_fog', label: 'Freezing fog', units: 'category', items: FOG_LEGEND.items },
                 {
                     id: 'snow',
                     label: 'Snow',
@@ -1234,8 +1228,29 @@ const FALLBACK_LEGENDS = {
                     ],
                 },
                 {
-                    id: 'shear_lee',
-                    label: 'Shear and lee turbulence',
+                    id: 'ts_precip',
+                    label: 'Thunderstorms',
+                    units: 'mm',
+                    items: [
+                        { color: '#00ff00', label: '0.1-0.3' },
+                        { color: '#fffb00', label: '0.5-1' },
+                        { color: '#ff9900', label: '5-7.5' },
+                        { color: '#ff0000', label: '15-20' },
+                    ],
+                },
+                {
+                    id: 'shear',
+                    label: 'Shear turbulence',
+                    units: 'category',
+                    items: [
+                        { color: '#ffcc00', label: 'MOD' },
+                        { color: '#ff6600', label: 'MOD/SEV' },
+                        { color: '#ff0000', label: 'SEV' },
+                    ],
+                },
+                {
+                    id: 'lee',
+                    label: 'Lee turbulence',
                     units: 'category',
                     items: [
                         { color: '#ffcc00', label: 'MOD' },
@@ -1251,6 +1266,15 @@ const FALLBACK_LEGENDS = {
                         { color: '#ff9900', label: '0.2-0.4' },
                         { color: '#ff0000', label: '0.4-0.6' },
                         { color: '#ff00ff', label: '0.6+' },
+                    ],
+                },
+                {
+                    id: 'thermals',
+                    label: 'Thermals',
+                    units: 'ft AGL',
+                    items: [
+                        { color: '#ffcc00', label: '6000-10000' },
+                        { color: '#ff6600', label: '10000+' },
                     ],
                 },
             ],
@@ -1317,6 +1341,7 @@ let controlsPanel;
 
 let legendEnabled = false;
 let hiddenLegendFields = {};
+let policyLayerOrder = DEFAULT_POLICY_LAYER_ORDER.slice();
 const policyStacks = { gfs: null, icon: null };
 const policyStackPromises = { gfs: null, icon: null };
 let policyPresets;
@@ -1358,6 +1383,7 @@ function normalizeFrameManifest(manifest) {
 function getLegendStoragePayload() {
     return {
         hiddenFields: hiddenLegendFields,
+        policyLayerOrder,
     };
 }
 
@@ -1372,6 +1398,7 @@ function loadLegendPreferences() {
         hiddenLegendFields = parsed?.hiddenFields && typeof parsed.hiddenFields === 'object'
             ? parsed.hiddenFields
             : {};
+        policyLayerOrder = normalizePolicyLayerOrder(parsed?.policyLayerOrder);
     } catch (error) {
         console.warn('Unable to restore legend preferences:', error);
     }
@@ -1563,6 +1590,7 @@ function formatLegendLabel(label) {
         'mountain wave intensity': 'Mountain wave intensity',
         'max wind below 850 hpa': 'Max wind below 5000ft',
         'shear and lee turbulence': 'Shear and lee turbulence',
+        'thunderstorm precipitation': 'Thunderstorms',
     };
 
     return overrides[raw.toLowerCase()] || raw;
@@ -1666,7 +1694,9 @@ function renderLegend() {
         const togglesNode = document.createElement('div');
         togglesNode.className = 'legend-field-toggles';
 
-        const fieldsToRender = (panelConfig.fields || []).filter(field => !EXCLUDED_LEGEND_FIELD_IDS.has(field?.id));
+        const fieldsToRender = (isPolicyCategory() && panelKey === 'left')
+            ? getPolicyLegendFields()
+            : (panelConfig.fields || []).filter(field => !EXCLUDED_LEGEND_FIELD_IDS.has(field?.id));
         const interactive = !isPolicyCategory();
 
         fieldsToRender.forEach((field, index) => {
@@ -2616,7 +2646,6 @@ function reducePolicyLayer(stack, layerId, reduceMode, selectedHours) {
 function colorizePolicyLayer(values, spec, nlat, nlon) {
     const image = new ImageData(nlon, nlat);
     const pixels = image.data;
-    const alpha = spec.alpha ?? 170;
     for (let row = 0; row < nlat; row += 1) {
         const srcRow = nlat - 1 - row;
         for (let col = 0; col < nlon; col += 1) {
@@ -2643,11 +2672,11 @@ function colorizePolicyLayer(values, spec, nlat, nlon) {
             if (!color) {
                 continue;
             }
-            const [red, green, blue, pixelAlpha] = hexToRgba(color, alpha);
+            const [red, green, blue] = hexToRgba(color, 255);
             pixels[pixel] = red;
             pixels[pixel + 1] = green;
             pixels[pixel + 2] = blue;
-            pixels[pixel + 3] = pixelAlpha;
+            pixels[pixel + 3] = 255;
         }
     }
     return image;
@@ -2704,12 +2733,17 @@ function paintPolicyOverlay(panel, model) {
     const srcY = (stackLatMax - georef.extent.latMax) / stack.dlat;
     const srcH = (georef.extent.latMax - georef.extent.latMin) / stack.dlat;
     const selectedHours = getSelectedForecastHours();
-    const scratch = document.createElement('canvas');
-    scratch.width = stack.nlon;
-    scratch.height = stack.nlat;
-    const scratchCtx = scratch.getContext('2d');
+    const composite = document.createElement('canvas');
+    composite.width = stack.nlon;
+    composite.height = stack.nlat;
+    const compositeCtx = composite.getContext('2d');
+    const layerCanvas = document.createElement('canvas');
+    layerCanvas.width = stack.nlon;
+    layerCanvas.height = stack.nlat;
+    const layerCtx = layerCanvas.getContext('2d');
 
-    POLICY_LAYER_RENDER.forEach((spec) => {
+    compositeCtx.imageSmoothingEnabled = false;
+    getOrderedPolicyLayerSpecs().forEach((spec) => {
         if (getFieldHiddenState('Policy', 'left', spec.id)) {
             return;
         }
@@ -2717,10 +2751,18 @@ function paintPolicyOverlay(panel, model) {
         if (!reduced) {
             return;
         }
-        scratchCtx.putImageData(colorizePolicyLayer(reduced, spec, stack.nlat, stack.nlon), 0, 0);
-        ctx.imageSmoothingEnabled = spec.discrete ? false : true;
-        ctx.drawImage(scratch, srcX, srcY, srcW, srcH, destLeft, destTop, destWidth, destHeight);
+        layerCtx.clearRect(0, 0, stack.nlon, stack.nlat);
+        layerCtx.putImageData(colorizePolicyLayer(reduced, spec, stack.nlat, stack.nlon), 0, 0);
+        compositeCtx.drawImage(layerCanvas, 0, 0);
     });
+
+    ctx.imageSmoothingEnabled = true;
+    if ('imageSmoothingQuality' in ctx) {
+        ctx.imageSmoothingQuality = 'high';
+    }
+    ctx.globalAlpha = POLICY_OVERLAY_ALPHA;
+    ctx.drawImage(composite, srcX, srcY, srcW, srcH, destLeft, destTop, destWidth, destHeight);
+    ctx.globalAlpha = 1;
 }
 
 function schedulePolicyOverlays() {
@@ -2866,10 +2908,267 @@ function syncPolicyPresetActiveState() {
     });
 }
 
+function normalizePolicyLayerOrder(order) {
+    const seen = new Set();
+    const next = [];
+    (Array.isArray(order) ? order : []).forEach((id) => {
+        const mapped = id === 'shear_lee' ? ['shear', 'lee'] : [id];
+        mapped.forEach((layerId) => {
+            if (DEFAULT_POLICY_LAYER_ORDER.includes(layerId) && !seen.has(layerId)) {
+                seen.add(layerId);
+                next.push(layerId);
+            }
+        });
+    });
+    DEFAULT_POLICY_LAYER_ORDER.forEach((id) => {
+        if (!seen.has(id)) {
+            next.push(id);
+        }
+    });
+    return next;
+}
+
+function getOrderedPolicyLayerSpecs() {
+    const byId = new Map(POLICY_LAYER_RENDER.map((spec) => [spec.id, spec]));
+    return normalizePolicyLayerOrder(policyLayerOrder).map((id) => byId.get(id)).filter(Boolean);
+}
+
 function getPolicyLegendFields() {
+    const fallback = FALLBACK_LEGENDS.Policy?.left?.fields || [];
     const config = getLegendConfigForCategory('Policy');
-    const fields = config?.left?.fields || FALLBACK_LEGENDS.Policy?.left?.fields || [];
-    return fields.filter((field) => field?.id && !EXCLUDED_LEGEND_FIELD_IDS.has(field.id));
+    const manifestFields = config?.left?.fields || [];
+    const byId = new Map();
+    [...manifestFields, ...fallback].forEach((field) => {
+        if (!field?.id || EXCLUDED_LEGEND_FIELD_IDS.has(field.id)) {
+            return;
+        }
+        byId.set(field.id, { ...byId.get(field.id), ...field });
+    });
+    return normalizePolicyLayerOrder(policyLayerOrder).map((id) => byId.get(id)).filter(Boolean);
+}
+
+function setPolicyLayerOrder(order, { persist = true } = {}) {
+    policyLayerOrder = normalizePolicyLayerOrder(order);
+    if (persist) {
+        saveLegendPreferences();
+    }
+    renderPolicyLayerList();
+    renderLegend();
+    schedulePolicyOverlays();
+}
+
+function movePolicyLayer(layerId, delta) {
+    const order = normalizePolicyLayerOrder(policyLayerOrder);
+    const from = order.indexOf(layerId);
+    if (from < 0) {
+        return;
+    }
+    const to = Math.max(0, Math.min(order.length - 1, from + delta));
+    if (to === from) {
+        return;
+    }
+    order.splice(from, 1);
+    order.splice(to, 0, layerId);
+    setPolicyLayerOrder(order);
+}
+
+let policyLayerDrag = null;
+
+function clearPolicyLayerDragStyle(button) {
+    if (!button) {
+        return;
+    }
+    button.classList.remove('is-dragging');
+    button.style.position = '';
+    button.style.left = '';
+    button.style.top = '';
+    button.style.width = '';
+    button.style.height = '';
+    button.style.zIndex = '';
+}
+
+function stopPolicyLayerDragListeners() {
+    window.removeEventListener('pointermove', onPolicyLayerPointerMove);
+    window.removeEventListener('pointerup', onPolicyLayerPointerUp);
+    window.removeEventListener('pointercancel', onPolicyLayerPointerUp);
+}
+
+function finishPolicyLayerDrag() {
+    const drag = policyLayerDrag;
+    policyLayerDrag = null;
+    document.body.classList.remove('policy-layer-dragging');
+    stopPolicyLayerDragListeners();
+    if (!drag) {
+        return;
+    }
+    if (drag.button?.hasPointerCapture?.(drag.pointerId)) {
+        drag.button.releasePointerCapture(drag.pointerId);
+    }
+    const order = [];
+    if (drag.moved && policyLayersList) {
+        [...policyLayersList.children].forEach((node) => {
+            if (node === drag.button) {
+                return;
+            }
+            if (node === drag.placeholder) {
+                order.push(drag.layerId);
+                return;
+            }
+            if (node.dataset.layerId) {
+                order.push(node.dataset.layerId);
+            }
+        });
+    }
+    drag.placeholder?.remove();
+    clearPolicyLayerDragStyle(drag.button);
+    if (drag.moved) {
+        setPolicyLayerOrder(order);
+        return;
+    }
+    const hidden = getFieldHiddenState('Policy', 'left', drag.layerId);
+    setFieldHiddenState('Policy', 'left', drag.layerId, !hidden);
+    saveLegendPreferences();
+    renderPolicyLayerList();
+    renderLegend();
+    schedulePolicyOverlays();
+}
+
+function updatePolicyLayerPlaceholder(clientY) {
+    const drag = policyLayerDrag;
+    if (!drag?.placeholder || !policyLayersList) {
+        return;
+    }
+    const others = [...policyLayersList.querySelectorAll('.policy-layer-toggle')].filter((node) => node !== drag.button);
+    let insertBefore = null;
+    others.forEach((node) => {
+        if (insertBefore) {
+            return;
+        }
+        const rect = node.getBoundingClientRect();
+        if (clientY < rect.top + rect.height / 2) {
+            insertBefore = node;
+        }
+    });
+    if (insertBefore) {
+        policyLayersList.insertBefore(drag.placeholder, insertBefore);
+    } else {
+        policyLayersList.appendChild(drag.placeholder);
+    }
+}
+
+function beginPolicyLayerDrag(event) {
+    const drag = policyLayerDrag;
+    if (!drag || drag.moved) {
+        return;
+    }
+    drag.moved = true;
+    document.body.classList.add('policy-layer-dragging');
+    const rect = drag.button.getBoundingClientRect();
+    drag.offsetX = event.clientX - rect.left;
+    drag.offsetY = event.clientY - rect.top;
+    const placeholder = document.createElement('div');
+    placeholder.className = 'policy-layer-placeholder';
+    placeholder.setAttribute('aria-hidden', 'true');
+    placeholder.style.height = `${rect.height}px`;
+    drag.placeholder = placeholder;
+    policyLayersList.insertBefore(placeholder, drag.button);
+    drag.button.classList.add('is-dragging');
+    drag.button.style.width = `${rect.width}px`;
+    drag.button.style.height = `${rect.height}px`;
+    drag.button.style.left = `${rect.left}px`;
+    drag.button.style.top = `${rect.top}px`;
+    try {
+        drag.button.setPointerCapture(event.pointerId);
+    } catch (error) {
+        // Pointer capture is optional; window listeners still track the drag.
+    }
+}
+
+function onPolicyLayerPointerMove(event) {
+    const drag = policyLayerDrag;
+    if (!drag || event.pointerId !== drag.pointerId) {
+        return;
+    }
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    if (!drag.moved && Math.hypot(dx, dy) < POLICY_LAYER_DRAG_THRESHOLD) {
+        return;
+    }
+    if (!drag.moved) {
+        beginPolicyLayerDrag(event);
+    }
+    event.preventDefault();
+    drag.button.style.left = `${event.clientX - drag.offsetX}px`;
+    drag.button.style.top = `${event.clientY - drag.offsetY}px`;
+    updatePolicyLayerPlaceholder(event.clientY);
+}
+
+function onPolicyLayerPointerUp(event) {
+    if (!policyLayerDrag || event.pointerId !== policyLayerDrag.pointerId) {
+        return;
+    }
+    finishPolicyLayerDrag();
+}
+
+function onPolicyLayerPointerDown(event) {
+    if (event.button !== 0 && event.pointerType !== 'touch') {
+        return;
+    }
+    const button = event.target.closest('.policy-layer-toggle');
+    if (!button || !policyLayersList?.contains(button) || button.disabled) {
+        return;
+    }
+    if (policyLayerDrag) {
+        finishPolicyLayerDrag();
+    }
+    policyLayerDrag = {
+        pointerId: event.pointerId,
+        button,
+        layerId: button.dataset.layerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        offsetX: 0,
+        offsetY: 0,
+        moved: false,
+        placeholder: null,
+    };
+    window.addEventListener('pointermove', onPolicyLayerPointerMove);
+    window.addEventListener('pointerup', onPolicyLayerPointerUp);
+    window.addEventListener('pointercancel', onPolicyLayerPointerUp);
+}
+
+function onPolicyLayerKeyDown(event) {
+    const button = event.target.closest('.policy-layer-toggle');
+    if (!button || !policyLayersList?.contains(button)) {
+        return;
+    }
+    if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        movePolicyLayer(button.dataset.layerId, -1);
+        policyLayersList.querySelector(`[data-layer-id="${button.dataset.layerId}"]`)?.focus();
+    } else if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        movePolicyLayer(button.dataset.layerId, 1);
+        policyLayersList.querySelector(`[data-layer-id="${button.dataset.layerId}"]`)?.focus();
+    } else if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        const hidden = getFieldHiddenState('Policy', 'left', button.dataset.layerId);
+        setFieldHiddenState('Policy', 'left', button.dataset.layerId, !hidden);
+        saveLegendPreferences();
+        renderPolicyLayerList();
+        renderLegend();
+        schedulePolicyOverlays();
+        policyLayersList.querySelector(`[data-layer-id="${button.dataset.layerId}"]`)?.focus();
+    }
+}
+
+function bindPolicyLayerListEvents() {
+    if (!policyLayersList || policyLayersList.dataset.bound === '1') {
+        return;
+    }
+    policyLayersList.dataset.bound = '1';
+    policyLayersList.addEventListener('pointerdown', onPolicyLayerPointerDown);
+    policyLayersList.addEventListener('keydown', onPolicyLayerKeyDown);
 }
 
 function renderPolicyLayerList() {
@@ -2877,6 +3176,7 @@ function renderPolicyLayerList() {
         return;
     }
 
+    bindPolicyLayerListEvents();
     policyLayersList.innerHTML = '';
     if (!isPolicyCategory()) {
         return;
@@ -2887,19 +3187,23 @@ function renderPolicyLayerList() {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = `policy-layer-toggle${hidden ? ' is-off' : ''}`;
+        button.dataset.layerId = field.id;
         button.setAttribute('aria-pressed', hidden ? 'false' : 'true');
+        button.setAttribute(
+            'aria-label',
+            `${formatLegendLabel(field.label || field.id)}. Click to ${hidden ? 'show' : 'hide'}, drag to reorder.`,
+        );
+        button.title = 'Click to show or hide. Drag to change stacking order.';
+        button.draggable = false;
+        const grip = document.createElement('span');
+        grip.className = 'policy-layer-grip';
+        grip.setAttribute('aria-hidden', 'true');
+        button.appendChild(grip);
         appendFieldSwatch(button, field);
         const label = document.createElement('span');
         label.className = 'legend-field-toggle-label';
         label.textContent = formatLegendLabel(field.label || field.id);
         button.appendChild(label);
-        button.addEventListener('click', () => {
-            setFieldHiddenState('Policy', 'left', field.id, !hidden);
-            saveLegendPreferences();
-            renderPolicyLayerList();
-            renderLegend();
-            schedulePolicyOverlays();
-        });
         policyLayersList.appendChild(button);
     });
 }
