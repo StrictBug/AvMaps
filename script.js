@@ -142,6 +142,7 @@ const POLICY_HIDDEN_LAYER_IDS = new Set(['mtw']);
 const DEFAULT_POLICY_LAYER_ORDER = POLICY_LAYER_RENDER
     .map((spec) => spec.id)
     .filter((id) => !POLICY_HIDDEN_LAYER_IDS.has(id));
+const POLICY_HIDDEN_DEFAULTS_VERSION = 1;
 const POLICY_LAYER_DRAG_THRESHOLD = 6;
 
 const LAYER_LOGIC = {
@@ -1315,6 +1316,7 @@ let controlsPanel;
 let legendEnabled = false;
 let hiddenLegendFields = {};
 let policyLayerOrder = DEFAULT_POLICY_LAYER_ORDER.slice();
+let policyHiddenDefaultsVersion = 0;
 const policyStacks = { gfs: null, icon: null };
 const policyStackPromises = { gfs: null, icon: null };
 let policyPresets;
@@ -1358,23 +1360,39 @@ function getLegendStoragePayload() {
     return {
         hiddenFields: hiddenLegendFields,
         policyLayerOrder,
+        policyHiddenDefaultsVersion,
     };
+}
+
+function applyPolicyHiddenDefaults() {
+    if (policyHiddenDefaultsVersion >= POLICY_HIDDEN_DEFAULTS_VERSION) {
+        return false;
+    }
+    if (!hiddenLegendFields.Policy || typeof hiddenLegendFields.Policy !== 'object') {
+        hiddenLegendFields.Policy = {};
+    }
+    hiddenLegendFields.Policy.left = DEFAULT_POLICY_LAYER_ORDER.slice();
+    policyHiddenDefaultsVersion = POLICY_HIDDEN_DEFAULTS_VERSION;
+    return true;
 }
 
 function loadLegendPreferences() {
     try {
         const raw = localStorage.getItem(LEGEND_PREFS_KEY);
-        if (!raw) {
-            return;
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            hiddenLegendFields = parsed?.hiddenFields && typeof parsed.hiddenFields === 'object'
+                ? parsed.hiddenFields
+                : {};
+            policyLayerOrder = normalizePolicyLayerOrder(parsed?.policyLayerOrder);
+            const storedVersion = Number(parsed?.policyHiddenDefaultsVersion);
+            policyHiddenDefaultsVersion = Number.isFinite(storedVersion) ? storedVersion : 0;
         }
-
-        const parsed = JSON.parse(raw);
-        hiddenLegendFields = parsed?.hiddenFields && typeof parsed.hiddenFields === 'object'
-            ? parsed.hiddenFields
-            : {};
-        policyLayerOrder = normalizePolicyLayerOrder(parsed?.policyLayerOrder);
     } catch (error) {
         console.warn('Unable to restore legend preferences:', error);
+    }
+    if (applyPolicyHiddenDefaults()) {
+        saveLegendPreferences();
     }
 }
 
