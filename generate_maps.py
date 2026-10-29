@@ -400,7 +400,7 @@ LEGEND_CONFIG = {
                 },
                 {
                     'id': 'icing',
-                    'label': 'Icing blw 10000ft',
+                    'label': 'Icing < 10000ft',
                     'units': '%',
                     'items': [
                         {'color': '#00ccff', 'label': '95-97.5'},
@@ -496,16 +496,6 @@ LEGEND_CONFIG = {
                         {'color': '#ffcc00', 'label': 'MOD'},
                         {'color': '#ff6600', 'label': 'MOD/SEV'},
                         {'color': '#ff0000', 'label': 'SEV'},
-                    ],
-                },
-                {
-                    'id': 'mtw',
-                    'label': 'MTW',
-                    'units': 'm/s',
-                    'items': [
-                        {'color': '#ff9900', 'label': '0.2-0.4'},
-                        {'color': '#ff0000', 'label': '0.4-0.6'},
-                        {'color': '#ff00ff', 'label': '0.6+'},
                     ],
                 },
                 {

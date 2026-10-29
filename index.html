@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Aviation map viewer</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="styles.css?v=policy-smooth-icing-1">
+    <link rel="stylesheet" href="styles.css?v=policy-overlay-fit-1">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.css">
 </head>
 <body class="loading">
@@ -267,12 +267,6 @@
                 <div class="info-controls-grid">
                     <div class="info-controls-col">
                         <div class="info-section">
-                            <h3>Information</h3>
-                            <p><span class="key-chip">I</span> Information popup</p>
-                            <p><span class="key-chip">Esc</span> Close popup / restore full table</p>
-                        </div>
-
-                        <div class="info-section">
                             <h3>Switch Category</h3>
                             <p><span class="key-chip">F</span> Fog & Low Cloud</p>
                             <p><span class="key-chip">L</span> Thunderstorms</p>
@@ -303,6 +297,12 @@
                             <p><span class="key-chip">S</span> Sounding</p>
                             <p><span class="key-chip">Shift</span> <span class="key-chip">T</span> Profile table</p>
                             <p><span class="key-chip">H</span> Hodograph</p>
+                        </div>
+
+                        <div class="info-section">
+                            <h3>Information</h3>
+                            <p><span class="key-chip">I</span> Information popup</p>
+                            <p><span class="key-chip">Esc</span> Close popup / restore full table</p>
                         </div>
                     </div>
                 </div>
@@ -342,7 +342,13 @@
                 <div class="time-controls-main">
                     <div class="range-time-display" id="range-time-display" aria-live="polite">
                         <div class="current-time-row">
-                            <div class="current-time-item"><strong id="current-frame-time">--</strong></div>
+                            <div class="current-time-item">
+                                <span class="time-label-slot">
+                                    <span class="time-label-sizer time-label-sizer-desktop" aria-hidden="true">Wednesday 31/12/2026, 23:00 AWST</span>
+                                    <span class="time-label-sizer time-label-sizer-mobile" aria-hidden="true">31/12/26 23 AWST</span>
+                                    <strong id="current-frame-time">--</strong>
+                                </span>
+                            </div>
                             <div class="timezone-selector">
                                 <select id="timezone-select" aria-label="Select timezone">
                                     <option value="UTC" selected>UTC (UTC+0:00)</option>
@@ -355,7 +361,13 @@
                             </div>
                         </div>
                         <div class="range-time-row">
-                            <span class="range-time-item range-time-item-start"><strong id="range-start-time">--</strong></span>
+                            <span class="range-time-item range-time-item-start">
+                                <span class="time-label-slot">
+                                    <span class="time-label-sizer time-label-sizer-desktop" aria-hidden="true">Wednesday 31/12/2026, 23:00 AWST</span>
+                                    <span class="time-label-sizer time-label-sizer-mobile" aria-hidden="true">31/12/26 23 AWST</span>
+                                    <strong id="range-start-time">--</strong>
+                                </span>
+                            </span>
                             <div class="slider-container">
                                 <div class="frame-slider-shell" id="frame-slider-shell">
                                     <div class="frame-slider-base" aria-hidden="true"></div>
@@ -365,7 +377,13 @@
                                     <input type="range" id="frame-slider" class="frame-slider" min="1" max="40" value="1" step="1">
                                 </div>
                             </div>
-                            <span class="range-time-item range-time-item-end"><strong id="range-end-time">--</strong></span>
+                            <span class="range-time-item range-time-item-end">
+                                <span class="time-label-slot">
+                                    <span class="time-label-sizer time-label-sizer-desktop" aria-hidden="true">Wednesday 31/12/2026, 23:00 AWST</span>
+                                    <span class="time-label-sizer time-label-sizer-mobile" aria-hidden="true">31/12/26 23 AWST</span>
+                                    <strong id="range-end-time">--</strong>
+                                </span>
+                            </span>
                         </div>
                     </div>
                     <div class="playback-controls">
@@ -387,6 +405,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.js"></script>
     <script src="sounding.js?v=profile-shift-t-1"></script>
-    <script src="script.js?v=policy-shear-lee-1"></script>
+    <script src="script.js?v=turb-info-split-1"></script>
 </body>
 </html>

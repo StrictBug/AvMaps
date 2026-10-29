@@ -138,7 +138,10 @@ const POLICY_LAYER_RENDER = [
     { id: 'mtw', reduce: 'max', edges: [0.2, 0.4, 0.6, 1e9], colors: ['#ff9900', '#ff0000', '#ff00ff'] },
     { id: 'thermals', reduce: 'max', edges: [6000, 10000, 20000], colors: ['#ffcc00', '#ff6600'] },
 ];
-const DEFAULT_POLICY_LAYER_ORDER = POLICY_LAYER_RENDER.map((spec) => spec.id);
+const POLICY_HIDDEN_LAYER_IDS = new Set(['mtw']);
+const DEFAULT_POLICY_LAYER_ORDER = POLICY_LAYER_RENDER
+    .map((spec) => spec.id)
+    .filter((id) => !POLICY_HIDDEN_LAYER_IDS.has(id));
 const POLICY_LAYER_DRAG_THRESHOLD = 6;
 
 const LAYER_LOGIC = {
@@ -418,7 +421,7 @@ const LAYER_LOGIC = {
                     name: 'Lee turbulence',
                     math: String.raw`
 \begin{aligned}
-&\text{downslope within }4000\,\mathrm{ft}\ \mathrm{AGL},\ p\ge 800\,\mathrm{hPa} \\
+&\text{Downslope within }4000\,\mathrm{ft}\ \mathrm{AGL},\ p\ge 800\,\mathrm{hPa} \\
 &\mathrm{mod}\ 30\text{--}40\,\mathrm{kt},\ \mathrm{mod/sev}\ 40\text{--}45\,\mathrm{kt},\ \mathrm{sev}\ge 45\,\mathrm{kt}
 \end{aligned}`,
                     legend: {
@@ -460,7 +463,7 @@ const LAYER_LOGIC = {
                     legend: { units: 'mm', items: PRECIP_LEGEND.items },
                 },
                 {
-                    name: 'Icing below 10000ft',
+                    name: 'Icing < 10000ft',
                     math: String.raw`\mathrm{Max}\big(\text{Icing}\mid \mathrm{FZL}<10000\,\mathrm{ft}\big)_{t_0-t}`,
                     legend: {
                         units: '%',
@@ -542,38 +545,18 @@ const LAYER_LOGIC = {
                     },
                 },
                 {
-                    name: 'Shear turbulence',
-                    math: String.raw`\mathrm{Max}(\text{Shear turbulence})_{t_0-t}`,
+                    name: 'Shear and lee turbulence',
+                    math: String.raw`
+\begin{aligned}
+&\mathrm{Max}(\text{Shear turbulence})_{t_0-t} \\
+&\mathrm{Max}(\text{Lee turbulence})_{t_0-t}
+\end{aligned}`,
                     legend: {
                         units: 'category',
                         items: [
                             { color: '#ffcc00', label: 'MOD' },
                             { color: '#ff6600', label: 'MOD/SEV' },
                             { color: '#ff0000', label: 'SEV' },
-                        ],
-                    },
-                },
-                {
-                    name: 'Lee turbulence',
-                    math: String.raw`\mathrm{Max}(\text{Lee turbulence})_{t_0-t}`,
-                    legend: {
-                        units: 'category',
-                        items: [
-                            { color: '#ffcc00', label: 'MOD' },
-                            { color: '#ff6600', label: 'MOD/SEV' },
-                            { color: '#ff0000', label: 'SEV' },
-                        ],
-                    },
-                },
-                {
-                    name: 'MTW',
-                    math: String.raw`\mathrm{Max}(\text{MTW})_{t_0-t}`,
-                    legend: {
-                        units: 'm/s',
-                        items: [
-                            { color: '#ff9900', label: '0.2–0.4' },
-                            { color: '#ff0000', label: '0.4–0.6' },
-                            { color: '#ff00ff', label: '0.6+' },
                         ],
                     },
                 },
@@ -1188,7 +1171,7 @@ const FALLBACK_LEGENDS = {
                 { id: 'precip', label: 'Precipitation', units: 'mm', items: PRECIP_LEGEND.items },
                 {
                     id: 'icing',
-                    label: 'Icing blw 10000ft',
+                    label: 'Icing < 10000ft',
                     units: '%',
                     items: [
                         { color: '#00ccff', label: '95-97.5' },
@@ -1256,16 +1239,6 @@ const FALLBACK_LEGENDS = {
                         { color: '#ffcc00', label: 'MOD' },
                         { color: '#ff6600', label: 'MOD/SEV' },
                         { color: '#ff0000', label: 'SEV' },
-                    ],
-                },
-                {
-                    id: 'mtw',
-                    label: 'MTW',
-                    units: 'm/s',
-                    items: [
-                        { color: '#ff9900', label: '0.2-0.4' },
-                        { color: '#ff0000', label: '0.4-0.6' },
-                        { color: '#ff00ff', label: '0.6+' },
                     ],
                 },
                 {
@@ -1348,6 +1321,7 @@ let policyPresets;
 let policyLayersPanel;
 let policyLayersList;
 let policyOverlayRaf = 0;
+let policyOverlayResizeObserver = null;
 
 function ensureDomainCache(domainId) {
     if (!framePairsCache[domainId]) {
@@ -1643,6 +1617,10 @@ function updateViewerBottomOffset() {
     if (controlsHeight > 0) {
         document.body.style.setProperty('--viewer-bottom-offset', `${controlsHeight}px`);
     }
+    requestAnimationFrame(() => {
+        window.SoundingViewer?.syncPin?.();
+        schedulePolicyOverlays();
+    });
 }
 
 function renderLegend() {
@@ -1785,9 +1763,7 @@ function setMaxFramesForCurrentSelection() {
     frameRangeEndSlider.min = 1;
     frameRangeEndSlider.max = maxFrames;
     frameRangeEndSlider.value = selectedRangeEnd;
-    currentFrame = isPolicyCategory()
-        ? selectedRangeEnd
-        : clampFrameToSelectedRange(currentFrame);
+    currentFrame = clampFrameToSelectedRange(currentFrame);
     frameSlider.value = currentFrame;
     updateSelectedRangeHighlight();
     updateRangeTimeDisplay();
@@ -1912,9 +1888,7 @@ function updateCurrentTimestepDisplay(framePair = null) {
 function updateRangeStartValue(value) {
     selectedRangeStart = Math.max(1, Math.min(value, selectedRangeEnd));
     frameRangeStartSlider.value = selectedRangeStart;
-    currentFrame = isPolicyCategory()
-        ? selectedRangeEnd
-        : clampFrameToSelectedRange(currentFrame);
+    currentFrame = clampFrameToSelectedRange(currentFrame);
     frameSlider.value = currentFrame;
     updateSelectedRangeHighlight();
     updateRangeTimeDisplay();
@@ -1924,9 +1898,7 @@ function updateRangeStartValue(value) {
 function updateRangeEndValue(value) {
     selectedRangeEnd = Math.min(maxFrames, Math.max(value, selectedRangeStart));
     frameRangeEndSlider.value = selectedRangeEnd;
-    currentFrame = isPolicyCategory()
-        ? selectedRangeEnd
-        : clampFrameToSelectedRange(currentFrame);
+    currentFrame = clampFrameToSelectedRange(currentFrame);
     frameSlider.value = currentFrame;
     updateSelectedRangeHighlight();
     updateRangeTimeDisplay();
@@ -2594,7 +2566,8 @@ async function ensurePolicyStacks() {
 function getSelectedForecastHours() {
     const framePairs = getCurrentFramePairs();
     const hours = [];
-    for (let index = selectedRangeStart; index <= selectedRangeEnd; index += 1) {
+    const endIndex = clampFrameToSelectedRange(currentFrame);
+    for (let index = selectedRangeStart; index <= endIndex; index += 1) {
         const hour = Number(framePairs[index - 1]?.hour);
         if (Number.isFinite(hour)) {
             hours.push(hour);
@@ -2694,21 +2667,21 @@ function paintPolicyOverlay(panel, model) {
     }
     const ctx = canvas.getContext('2d');
     const panelEl = img.closest('.image-panel');
-    const imgRect = img.getBoundingClientRect();
-    const panelRect = panelEl?.getBoundingClientRect() || imgRect;
-    const width = imgRect.width;
-    const height = imgRect.height;
-    if (!width || !height) {
+    const panelRect = panelEl?.getBoundingClientRect();
+    const box = getDisplayedImageContentBox(img);
+    const width = box.width;
+    const height = box.height;
+    if (!panelRect || !width || !height) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         return;
     }
     const ratio = window.devicePixelRatio || 1;
-    canvas.style.left = `${imgRect.left - panelRect.left}px`;
-    canvas.style.top = `${imgRect.top - panelRect.top}px`;
+    canvas.style.left = `${box.left - panelRect.left}px`;
+    canvas.style.top = `${box.top - panelRect.top}px`;
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
-    canvas.width = Math.round(width * ratio);
-    canvas.height = Math.round(height * ratio);
+    canvas.width = Math.max(1, Math.round(width * ratio));
+    canvas.height = Math.max(1, Math.round(height * ratio));
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     ctx.clearRect(0, 0, width, height);
 
@@ -2718,11 +2691,10 @@ function paintPolicyOverlay(panel, model) {
         return;
     }
 
-    const box = getDisplayedImageContentBox(img);
-    const destLeft = box.left - imgRect.left + georef.axesFraction.left * box.width;
-    const destTop = box.top - imgRect.top + georef.axesFraction.top * box.height;
-    const destWidth = georef.axesFraction.width * box.width;
-    const destHeight = georef.axesFraction.height * box.height;
+    const destLeft = georef.axesFraction.left * width;
+    const destTop = georef.axesFraction.top * height;
+    const destWidth = georef.axesFraction.width * width;
+    const destHeight = georef.axesFraction.height * height;
     if (destWidth <= 1 || destHeight <= 1) {
         return;
     }
@@ -2887,9 +2859,7 @@ function applyPolicyPreset(startHour, endHour) {
     selectedRangeEnd = Math.max(startIndex, endIndex);
     if (frameRangeStartSlider) frameRangeStartSlider.value = selectedRangeStart;
     if (frameRangeEndSlider) frameRangeEndSlider.value = selectedRangeEnd;
-    currentFrame = isPolicyCategory()
-        ? selectedRangeEnd
-        : clampFrameToSelectedRange(currentFrame);
+    currentFrame = selectedRangeEnd;
     if (frameSlider) frameSlider.value = currentFrame;
     updateSelectedRangeHighlight();
     updateRangeTimeDisplay();
@@ -2930,7 +2900,10 @@ function normalizePolicyLayerOrder(order) {
 
 function getOrderedPolicyLayerSpecs() {
     const byId = new Map(POLICY_LAYER_RENDER.map((spec) => [spec.id, spec]));
-    return normalizePolicyLayerOrder(policyLayerOrder).map((id) => byId.get(id)).filter(Boolean);
+    return normalizePolicyLayerOrder(policyLayerOrder)
+        .filter((id) => !POLICY_HIDDEN_LAYER_IDS.has(id))
+        .map((id) => byId.get(id))
+        .filter(Boolean);
 }
 
 function getPolicyLegendFields() {
@@ -2939,7 +2912,7 @@ function getPolicyLegendFields() {
     const manifestFields = config?.left?.fields || [];
     const byId = new Map();
     [...manifestFields, ...fallback].forEach((field) => {
-        if (!field?.id || EXCLUDED_LEGEND_FIELD_IDS.has(field.id)) {
+        if (!field?.id || EXCLUDED_LEGEND_FIELD_IDS.has(field.id) || POLICY_HIDDEN_LAYER_IDS.has(field.id)) {
             return;
         }
         byId.set(field.id, { ...byId.get(field.id), ...field });
@@ -3211,18 +3184,15 @@ function renderPolicyLayerList() {
 function syncPolicyMode() {
     const enabled = isPolicyCategory();
     document.body.classList.toggle('policy-mode', enabled);
-    window.SoundingViewer?.setToolsAvailable?.(!enabled);
+    window.SoundingViewer?.setToolsAvailable?.(true);
     updatePolicyPresetLabels();
     renderPolicyLayerList();
     if (playBtn) {
-        playBtn.disabled = enabled;
-        playBtn.title = enabled ? 'Playback is not used on Policy maps' : '';
-        if (enabled) {
-            stopAnimation();
-        }
+        playBtn.disabled = false;
+        playBtn.title = '';
     }
     if (enabled) {
-        currentFrame = selectedRangeEnd;
+        currentFrame = isPlaying ? clampFrameToSelectedRange(currentFrame) : selectedRangeEnd;
         if (frameSlider) {
             frameSlider.value = currentFrame;
         }
@@ -3317,34 +3287,49 @@ function updateImages() {
 
 function getDisplayedImageContentBox(img) {
     const rect = img.getBoundingClientRect();
+    const styles = window.getComputedStyle(img);
+    const borderLeft = Number.parseFloat(styles.borderLeftWidth) || 0;
+    const borderRight = Number.parseFloat(styles.borderRightWidth) || 0;
+    const borderTop = Number.parseFloat(styles.borderTopWidth) || 0;
+    const borderBottom = Number.parseFloat(styles.borderBottomWidth) || 0;
+    const padLeft = Number.parseFloat(styles.paddingLeft) || 0;
+    const padRight = Number.parseFloat(styles.paddingRight) || 0;
+    const padTop = Number.parseFloat(styles.paddingTop) || 0;
+    const padBottom = Number.parseFloat(styles.paddingBottom) || 0;
+
+    const containerLeft = rect.left + borderLeft + padLeft;
+    const containerTop = rect.top + borderTop + padTop;
+    const containerWidth = Math.max(rect.width - borderLeft - borderRight - padLeft - padRight, 0);
+    const containerHeight = Math.max(rect.height - borderTop - borderBottom - padTop - padBottom, 0);
+
     const naturalWidth = img.naturalWidth || 1;
     const naturalHeight = img.naturalHeight || 1;
-    const containerAspect = rect.width / Math.max(rect.height, 1e-6);
+    const containerAspect = containerWidth / Math.max(containerHeight, 1e-6);
     const imageAspect = naturalWidth / naturalHeight;
 
-    let contentWidth = rect.width;
-    let contentHeight = rect.height;
-    let offsetX = 0;
-    let offsetY = 0;
+    let contentWidth = containerWidth;
+    let contentHeight = containerHeight;
+    let letterboxX = 0;
+    let letterboxY = 0;
 
-    // object-fit: contain letterboxing
+    // object-fit: contain letterboxing inside the padding box (not the border box).
     if (containerAspect > imageAspect) {
-        contentHeight = rect.height;
+        contentHeight = containerHeight;
         contentWidth = contentHeight * imageAspect;
-        offsetX = (rect.width - contentWidth) / 2;
+        letterboxX = (containerWidth - contentWidth) / 2;
     } else {
-        contentWidth = rect.width;
+        contentWidth = containerWidth;
         contentHeight = contentWidth / imageAspect;
-        offsetY = (rect.height - contentHeight) / 2;
+        letterboxY = (containerHeight - contentHeight) / 2;
     }
 
     return {
-        left: rect.left + offsetX,
-        top: rect.top + offsetY,
+        left: containerLeft + letterboxX,
+        top: containerTop + letterboxY,
         width: contentWidth,
         height: contentHeight,
-        offsetX,
-        offsetY,
+        offsetX: (containerLeft - rect.left) + letterboxX,
+        offsetY: (containerTop - rect.top) + letterboxY,
     };
 }
 
@@ -3460,6 +3445,21 @@ function notifyMapLayoutChanged() {
     });
 }
 
+function bindPolicyOverlayResizeObserver() {
+    if (policyOverlayResizeObserver || typeof ResizeObserver === 'undefined') {
+        return;
+    }
+    policyOverlayResizeObserver = new ResizeObserver(() => {
+        schedulePolicyOverlays();
+        window.SoundingViewer?.syncPin?.();
+    });
+    Object.values(mapImagesByPanel).forEach((img) => {
+        if (img) {
+            policyOverlayResizeObserver.observe(img);
+        }
+    });
+}
+
 function lonLatToImageOffsets(img, lon, lat, domainId = currentDomain) {
     const georef = getDomainGeoref(domainId);
     if (!georef || !img?.complete || !img.naturalWidth || !img.naturalHeight) {
@@ -3551,15 +3551,19 @@ window.MapGeoref = {
 };
 
 function startAnimation() {
-    if (isPolicyCategory() || animationInterval) {
+    if (animationInterval) {
         return;
     }
 
     currentFrame = clampFrameToSelectedRange(currentFrame);
+    if (isPolicyCategory() && currentFrame === selectedRangeEnd && selectedRangeEnd > selectedRangeStart) {
+        currentFrame = selectedRangeStart;
+    }
     frameSlider.value = currentFrame;
 
     isPlaying = true;
     playBtn.textContent = '⏸ Pause';
+    updateImages();
 
     animationInterval = setInterval(() => {
         currentFrame += 1;
@@ -3717,9 +3721,6 @@ function setupEventListeners() {
     }
 
     playBtn.addEventListener('click', function() {
-        if (isPolicyCategory()) {
-            return;
-        }
         if (isPlaying) {
             stopAnimation();
         } else {
@@ -3788,6 +3789,8 @@ function setupEventListeners() {
     legendHelpBtn?.addEventListener('click', function() {
         openInfoModal('layers');
     });
+
+    bindPolicyOverlayResizeObserver();
 
     Object.values(mapImagesByPanel).forEach((img) => {
         if (!img) return;
@@ -3864,10 +3867,8 @@ function setupEventListeners() {
         }
 
         if (event.key.toLowerCase() === 't' && event.shiftKey) {
-            if (!isPolicyCategory()) {
-                window.SoundingViewer?.toggleTool?.('table');
-            }
-                event.preventDefault();
+            window.SoundingViewer?.toggleTool?.('table');
+            event.preventDefault();
             return;
         }
 
@@ -3877,9 +3878,7 @@ function setupEventListeners() {
         };
         const profileToolId = profileToolHotkeys[event.key.toLowerCase()];
         if (profileToolId && !event.shiftKey && window.SoundingViewer?.toggleTool) {
-            if (!isPolicyCategory()) {
-                window.SoundingViewer.toggleTool(profileToolId);
-            }
+            window.SoundingViewer.toggleTool(profileToolId);
             event.preventDefault();
             return;
         }
@@ -3924,11 +3923,7 @@ function setupEventListeners() {
 
         switch (event.key) {
             case 'ArrowLeft':
-                if (isPolicyCategory()) {
-                    if (selectedRangeEnd > selectedRangeStart) {
-                        updateRangeEndValue(selectedRangeEnd - 1);
-                    }
-                } else if (currentFrame > selectedRangeStart) {
+                if (currentFrame > selectedRangeStart) {
                     currentFrame -= 1;
                     frameSlider.value = currentFrame;
                     updateImages();
@@ -3936,11 +3931,7 @@ function setupEventListeners() {
                 event.preventDefault();
                 break;
             case 'ArrowRight':
-                if (isPolicyCategory()) {
-                    if (selectedRangeEnd < maxFrames) {
-                        updateRangeEndValue(selectedRangeEnd + 1);
-                    }
-                } else if (currentFrame < selectedRangeEnd) {
+                if (currentFrame < selectedRangeEnd) {
                     currentFrame += 1;
                     frameSlider.value = currentFrame;
                     updateImages();
@@ -3948,12 +3939,10 @@ function setupEventListeners() {
                 event.preventDefault();
                 break;
             case ' ':
-                if (!isPolicyCategory()) {
                 if (isPlaying) {
                     stopAnimation();
                 } else {
                     startAnimation();
-                    }
                 }
                 event.preventDefault();
                 break;
