@@ -48,6 +48,20 @@ const imageConfig = {
         bottomLeft: { title: 'Thunderstorms' },
         bottomRight: { title: 'Storm Dynamics' },
     },
+    Policy: {
+        layout: 'pair',
+        columns: [
+            { id: 'policy', title: 'Policy' },
+        ],
+        rows: [
+            { id: 'gfs', title: 'GFS' },
+            { id: 'icon', title: 'ICON' },
+        ],
+        left: { folder: 'GFS', title: 'GFS' },
+        right: { folder: 'ICON', title: 'ICON' },
+        topLeft: { title: 'Policy' },
+        bottomLeft: { title: 'Policy' },
+    },
     Turb: {
         layout: 'quad',
         columns: [
@@ -65,6 +79,492 @@ const imageConfig = {
         bottomLeft: { title: 'Low Level Turbulence' },
         bottomRight: { title: 'Mountain Waves' },
     }
+};
+
+const PRECIP_LEGEND = {
+    units: 'mm/h',
+    items: [
+        { color: '#f0ff96', label: '0.1–0.2' },
+        { color: '#f0ff3c', label: '0.2–0.5' },
+        { color: '#ffff00', label: '0.5–1' },
+        { color: '#c8ff00', label: '1–2' },
+        { color: '#96ff00', label: '2–5' },
+        { color: '#009600', label: '5–7.5' },
+        { color: '#00af80', label: '7.5–10' },
+        { color: '#00c8ff', label: '10–15' },
+        { color: '#0096ff', label: '15–20' },
+        { color: '#0000ff', label: '20–25' },
+        { color: '#0000ff', label: '25–30' },
+        { color: '#ff6400', label: '30–35' },
+        { color: '#ff3200', label: '35–40' },
+        { color: '#ff0000', label: '40–45' },
+        { color: '#c80000', label: '45–50' },
+        { color: '#320000', label: '50+' },
+    ],
+};
+
+const FOG_LEGEND = {
+    units: 'category',
+    items: [
+        { color: '#ff0000', label: 'F1' },
+        { color: '#ffaa7f', label: 'F2' },
+        { color: '#ffff00', label: 'F3' },
+    ],
+};
+
+const POLICY_LAYER_RENDER = [
+    { id: 'low_cloud', reduce: 'max', alpha: 150, edges: [85, 90, 95, 97.5, 100], colors: ['#ffffff', '#c86400', '#aa5500', '#6d3600'] },
+    { id: 'drizzle', reduce: 'max', alpha: 150, edges: [95, 100], colors: ['#00ff00'] },
+    { id: 'fog', reduce: 'max', alpha: 160, discrete: true, colors: { 1: '#ff0000', 2: '#ffaa7f', 3: '#ffff00' } },
+    { id: 'freezing_fog', reduce: 'max', alpha: 180, discrete: true, colors: { 1: '#ff0000', 2: '#ffaa7f', 3: '#ffff00' } },
+    { id: 'icing', reduce: 'max', alpha: 180, edges: [95, 97.5, 100], colors: ['#00ccff', '#00ffff'] },
+    { id: 'thermals', reduce: 'max', alpha: 170, edges: [6000, 10000, 20000], colors: ['#ffcc00', '#ff6600'] },
+    { id: 'precip', reduce: 'sum', alpha: 160, edges: [0.1, 0.2, 0.5, 1, 2, 5, 7.5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 1e9], colors: ['#f0ff96', '#f0ff3c', '#ffff00', '#c8ff00', '#96ff00', '#009600', '#00af80', '#00c8ff', '#0096ff', '#0000ff', '#0000ff', '#ff6400', '#ff3200', '#ff0000', '#c80000', '#320000'] },
+    { id: 'snow', reduce: 'sum', alpha: 190, edges: [0.1, 0.2, 0.5, 1, 2, 4, 8, 1e9], colors: ['#00b7ff', '#2cc7ff', '#54d6ff', '#7ee3ff', '#a8eeff', '#cdf6ff', '#ffffff'] },
+    { id: 'small_hail', reduce: 'sum', alpha: 180, edges: [0.1, 0.5, 1, 2.5, 5, 10, 20, 40, 1e9], colors: ['#e0f7fa', '#b2ebf2', '#80deea', '#4dd0e1', '#00bcd4', '#0097a7', '#006064', '#00363a'] },
+    { id: 'ts_precip', reduce: 'sum', alpha: 200, edges: [0.1, 0.3, 0.5, 1, 2.5, 5, 7.5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 100, 300, 1e9], colors: ['#00ff00', '#80ff00', '#fffb00', '#fff000', '#ffda00', '#ff9900', '#ff7300', '#ff4c00', '#ff0000', '#ff206e', '#ff2079', '#ff229f', '#ff1eb8', '#ff20d6', '#ec20ff', '#c020ff', '#9021ff', '#651dff', '#1c14ff', '#0effeb'] },
+    { id: 'shear_lee', reduce: 'max', alpha: 200, discrete: true, colors: { 1: '#ffcc00', 2: '#ff6600', 3: '#ff0000' } },
+    { id: 'mtw', reduce: 'max', alpha: 200, edges: [0.2, 0.4, 0.6, 1e9], colors: ['#ff9900', '#ff0000', '#ff00ff'] },
+];
+
+const LAYER_LOGIC = {
+    BG: {
+        fog: {
+            title: 'Fog & Low Cloud',
+            layers: [
+                {
+                    name: '1 hr precipitation',
+                    math: String.raw`\text{1 hr precip.}\ge 0.1\,\mathrm{mm\,hr^{-1}}`,
+                    legend: PRECIP_LEGEND,
+                },
+                {
+                    name: 'Drizzle',
+                    math: String.raw`\text{mean RH }(950/900/850\,\mathrm{hPa})\ge 95\%`,
+                    legend: {
+                        units: 'avg RH %',
+                        items: [{ color: '#00ff00', label: '95–100' }],
+                    },
+                },
+                {
+                    name: 'Low cloud',
+                    math: String.raw`\text{max RH }(1000/975/950\,\mathrm{hPa})\ge 85\%`,
+                    legend: {
+                        units: 'max RH %',
+                        items: [
+                            { color: '#ffffff', label: '85–90' },
+                            { color: '#c86400', label: '90–95' },
+                            { color: '#aa5500', label: '95–97.5' },
+                            { color: '#6d3600', label: '97.5–100' },
+                        ],
+                    },
+                },
+                {
+                    name: 'Fog',
+                    math: String.raw`
+\begin{aligned}
+\mathrm{F1}&: 10\mathrm{m}\ \mathrm{wind}<5\,\mathrm{kt},\ T-T_d<1^{\circ}\mathrm{C} \\
+\mathrm{F2}&: 10\mathrm{m}\ \mathrm{wind}<3\,\mathrm{kt},\ T-T_d<0.5^{\circ}\mathrm{C} \\
+\mathrm{F3}&: 10\mathrm{m}\ \mathrm{wind}<1\,\mathrm{kt},\ T-T_d<0.1^{\circ}\mathrm{C}
+\end{aligned}`,
+                    legend: FOG_LEGEND,
+                },
+            ],
+        },
+    },
+    TS: {
+        flash: {
+            title: 'Thunderstorms',
+            layers: [
+                {
+                    name: '1 hr thunderstorm precipitation',
+                    math: String.raw`
+\begin{aligned}
+&\text{1 hr convective precip.}\ge 0.1\,\mathrm{mm} \\
+&\text{where }\min\mathrm{LI}\text{ to }{-20}^{\circ}\mathrm{C}<0 \\
+&\text{and }\max\mathrm{VV}_{500-250\,\mathrm{hPa}}>0.1\,\mathrm{m\,s^{-1}}
+\end{aligned}`,
+                    legend: {
+                        units: 'mm/h',
+                        items: [
+                            { color: '#00ff00', label: '0.1–0.3' },
+                            { color: '#80ff00', label: '0.3–0.5' },
+                            { color: '#fffb00', label: '0.5–1' },
+                            { color: '#fff000', label: '1–2.5' },
+                            { color: '#ffda00', label: '2.5–5' },
+                            { color: '#ff9900', label: '5–7.5' },
+                            { color: '#ff7300', label: '7.5–10' },
+                            { color: '#ff4c00', label: '10–15' },
+                            { color: '#ff0000', label: '15–20' },
+                            { color: '#ff206e', label: '20–25' },
+                            { color: '#ff2079', label: '25–30' },
+                            { color: '#ff229f', label: '30–35' },
+                            { color: '#ff1eb8', label: '35–40' },
+                            { color: '#ff20d6', label: '40–45' },
+                            { color: '#ec20ff', label: '45–50' },
+                            { color: '#c020ff', label: '50–55' },
+                            { color: '#9021ff', label: '55–60' },
+                            { color: '#651dff', label: '60–100' },
+                            { color: '#1c14ff', label: '100–300' },
+                            { color: '#0effeb', label: '300+' },
+                        ],
+                    },
+                },
+            ],
+        },
+        severe: {
+            title: 'Storm Dynamics',
+            layers: [
+                {
+                    name: 'SigHail',
+                    math: String.raw`\mathrm{SigHail}=\frac{\mathrm{SBCAPE}\cdot q_{\mathrm{sfc}}\cdot 1000\cdot\Gamma_{700-500}\cdot T_{500}\cdot\text{Bulk shear}_{0-6\,\mathrm{km}}}{4.4\times 10^{7}}`,
+                    legend: {
+                        units: 'index',
+                        items: [
+                            { color: 'rgba(97,0,97,0.47)', label: '0.1–0.2' },
+                            { color: 'rgba(119,0,135,0.47)', label: '0.2–0.3' },
+                            { color: 'rgba(128,0,206,0.47)', label: '0.3–0.4' },
+                            { color: 'rgba(0,127,254,0.47)', label: '0.4–0.5' },
+                            { color: 'rgba(0,168,254,0.47)', label: '0.5–0.6' },
+                            { color: 'rgba(0,208,254,0.47)', label: '0.6–0.7' },
+                            { color: 'rgba(0,245,254,0.47)', label: '0.7–0.8' },
+                            { color: 'rgba(0,254,179,0.47)', label: '0.8–0.9' },
+                            { color: 'rgba(0,254,70,0.47)', label: '0.9–1.0' },
+                            { color: 'rgba(104,254,0,0.47)', label: '1.0–1.1' },
+                            { color: 'rgba(165,254,0,0.47)', label: '1.1–1.2' },
+                            { color: 'rgba(193,254,0,0.47)', label: '1.2–1.3' },
+                            { color: 'rgba(221,254,0,0.47)', label: '1.3–1.4' },
+                            { color: 'rgba(248,254,0,0.47)', label: '1.4–1.5' },
+                            { color: 'rgba(254,231,0,0.47)', label: '1.5–1.6' },
+                            { color: 'rgba(254,202,0,0.47)', label: '1.6–1.7' },
+                            { color: 'rgba(254,171,0,0.47)', label: '1.7–1.8' },
+                            { color: 'rgba(254,140,0,0.47)', label: '1.8–1.9' },
+                            { color: 'rgba(254,107,0,0.47)', label: '1.9–2.0' },
+                            { color: 'rgba(254,70,0,0.47)', label: '2.0–2.2' },
+                            { color: 'rgba(254,0,0,0.47)', label: '2.2–2.4' },
+                            { color: 'rgba(254,77,77,0.47)', label: '2.4–2.6' },
+                            { color: 'rgba(254,109,109,0.47)', label: '2.6–2.8' },
+                            { color: 'rgba(254,132,132,0.47)', label: '2.8–3.0' },
+                            { color: 'rgba(254,171,171,0.47)', label: '3.0–3.5' },
+                            { color: 'rgba(254,210,210,0.47)', label: '3.5–4.0' },
+                            { color: 'rgba(254,223,223,0.47)', label: '4.0–5.0' },
+                            { color: 'rgba(254,254,254,0.47)', label: '5+' },
+                        ],
+                    },
+                },
+                {
+                    name: 'Upper isotachs',
+                    math: String.raw`250\,\mathrm{hPa}\ \mathrm{wind}`,
+                    legend: {
+                        units: 'kt',
+                        items: [
+                            { color: '#000080', label: '80–100' },
+                            { color: '#ffff00', label: '100–120' },
+                            { color: '#ff6600', label: '120–140' },
+                            { color: '#ff0000', label: '140–160' },
+                            { color: '#800000', label: '160–180' },
+                            { color: '#ff00ff', label: '180+' },
+                        ],
+                    },
+                },
+                {
+                    name: '0-6km bulk shear',
+                    math: String.raw`\text{Bulk shear}_{0-6\,\mathrm{km}}=\left|\vec{V}_{500}-\vec{V}_{10\mathrm{m}}\right|`,
+                    legend: {
+                        items: [{ pattern: 'barb', color: '#2b0000', label: '0–6 km bulk shear' }],
+                    },
+                },
+            ],
+        },
+    },
+    Airmass: {
+        fzl: {
+            title: 'Freezing Level',
+            layers: [
+                {
+                    name: 'Freezing layer',
+                    math: String.raw`\ge 2\ \text{crossings of }0^{\circ}\mathrm{C}`,
+                    legend: {
+                        units: 'hatch',
+                        items: [{ pattern: 'crosshatch', label: 'Multiple 0°C crossings' }],
+                    },
+                },
+                {
+                    name: 'Icing severity',
+                    math: String.raw`\text{mean RH }(0\text{ to }{-15}^{\circ}\mathrm{C})`,
+                    legend: {
+                        units: '%',
+                        items: [
+                            { color: '#00ccff', label: '95–97.5' },
+                            { color: '#00ffff', label: '97.5–100' },
+                        ],
+                    },
+                },
+                {
+                    name: 'Thermals',
+                    math: String.raw`
+\begin{aligned}
+&T_{2\mathrm{m}}>30^{\circ}\mathrm{C}\ \text{and sfc superadiabat} \\
+&\text{depth where }\theta>\theta_{2\mathrm{m}}+0.5\,\mathrm{K}
+\end{aligned}`,
+                    legend: {
+                        units: 'ft AGL',
+                        items: [
+                            { color: '#ffcc00', label: '6000–10000' },
+                            { color: '#ff6600', label: '10000+' },
+                        ],
+                    },
+                },
+                {
+                    name: '1 hr small hail',
+                    math: String.raw`\text{1 hr convective precip.}\ge 0.1\,\mathrm{mm}\ \text{where }T_{700}<-9^{\circ}\mathrm{C}`,
+                    legend: {
+                        units: 'mm/h',
+                        items: [
+                            { color: '#e0f7fa', label: '0.1–0.5' },
+                            { color: '#b2ebf2', label: '0.5–1' },
+                            { color: '#80deea', label: '1–2.5' },
+                            { color: '#4dd0e1', label: '2.5–5' },
+                            { color: '#00bcd4', label: '5–10' },
+                            { color: '#0097a7', label: '10–20' },
+                            { color: '#006064', label: '20–40' },
+                            { color: '#00363a', label: '40+' },
+                        ],
+                    },
+                },
+                {
+                    name: 'Freezing fog',
+                    math: String.raw`\text{Fog where }T_{2\mathrm{m}}<0^{\circ}\mathrm{C}`,
+                    legend: FOG_LEGEND,
+                },
+            ],
+        },
+        snow: {
+            title: 'Snow Level',
+            layers: [
+                {
+                    name: '1 hr snow',
+                    math: String.raw`\text{1 hr precip.}\ge 0.1\,\mathrm{mm}\ \text{where snow level}<\text{terrain}+600\,\mathrm{ft}`,
+                    legend: {
+                        units: 'mm/h',
+                        items: [
+                            { color: '#00b7ff', label: '0.1–0.2' },
+                            { color: '#2cc7ff', label: '0.2–0.5' },
+                            { color: '#54d6ff', label: '0.5–1' },
+                            { color: '#7ee3ff', label: '1–2' },
+                            { color: '#a8eeff', label: '2–4' },
+                            { color: '#cdf6ff', label: '4–8' },
+                            { color: '#ffffff', label: '8+' },
+                        ],
+                    },
+                },
+            ],
+        },
+    },
+    Turb: {
+        wind: {
+            title: 'Low Level Turbulence',
+            layers: [
+                {
+                    name: 'Max wind below 5000ft',
+                    math: String.raw`\max\mathrm{wind}\ (\mathrm{SFC}\text{--}850\,\mathrm{hPa})`,
+                    legend: {
+                        units: 'kt',
+                        items: [
+                            { color: '#00ff00', label: '25–30' },
+                            { color: '#006800', label: '30–35' },
+                            { color: '#00b4ff', label: '35–40' },
+                            { color: '#0064ff', label: '40–45' },
+                            { color: '#0000ff', label: '45–50' },
+                            { color: '#ff5555', label: '50–55' },
+                            { color: '#ff0000', label: '55–60' },
+                            { color: '#e60000', label: '60–70' },
+                            { color: '#be0000', label: '70–80' },
+                            { color: '#960000', label: '80+' },
+                        ],
+                    },
+                },
+                {
+                    name: 'Shear turbulence',
+                    math: String.raw`
+\begin{aligned}
+&\max\left|\vec{V}_{p}-\vec{V}_{10\mathrm{m}}\right|\ \text{on levels }p\ge 800\,\mathrm{hPa} \\
+\left|\vec{V}_{p}\right|>45\,\mathrm{kt}&: \mathrm{mod}\ 27.5\text{--}50\,\mathrm{kt},\ \mathrm{mod/sev}\ 50\text{--}60\,\mathrm{kt},\ \mathrm{sev}\ge 60\,\mathrm{kt} \\
+\left|\vec{V}_{p}\right|>65\,\mathrm{kt}&: \mathrm{mod}\ 25\text{--}40\,\mathrm{kt},\ \mathrm{mod/sev}\ 40\text{--}45\,\mathrm{kt},\ \mathrm{sev}\ge 45\,\mathrm{kt}
+\end{aligned}`,
+                    legend: {
+                        units: 'category',
+                        items: [
+                            { color: '#ffcc00', label: 'MOD' },
+                            { color: '#ff6600', label: 'MOD/SEV' },
+                            { color: '#ff0000', label: 'SEV' },
+                        ],
+                    },
+                },
+                {
+                    name: 'Lee turbulence',
+                    math: String.raw`
+\begin{aligned}
+&\text{downslope within }4000\,\mathrm{ft}\ \mathrm{AGL},\ p\ge 800\,\mathrm{hPa} \\
+&\mathrm{mod}\ 30\text{--}40\,\mathrm{kt},\ \mathrm{mod/sev}\ 40\text{--}45\,\mathrm{kt},\ \mathrm{sev}\ge 45\,\mathrm{kt}
+\end{aligned}`,
+                    legend: {
+                        units: 'category',
+                        items: [
+                            { color: '#ffcc00', label: 'MOD' },
+                            { color: '#ff6600', label: 'MOD/SEV' },
+                            { color: '#ff0000', label: 'SEV' },
+                        ],
+                    },
+                },
+            ],
+        },
+        mtw: {
+            title: 'Mountain Waves',
+            layers: [
+                {
+                    name: 'Mountain wave intensity',
+                    math: String.raw`\max|\mathrm{VV}|_{p\ge 250\,\mathrm{hPa}}`,
+                    legend: {
+                        units: 'm/s',
+                        items: [
+                            { color: '#ff9900', label: '0.2–0.4' },
+                            { color: '#ff0000', label: '0.4–0.6' },
+                            { color: '#ff00ff', label: '0.6+' },
+                        ],
+                    },
+                },
+            ],
+        },
+    },
+    Policy: {
+        policy: {
+            title: 'Policy',
+            layers: [
+                {
+                    name: 'Precipitation',
+                    math: String.raw`\sum_{t_0}^{t}(\text{Precipitation})`,
+                    legend: { units: 'mm', items: PRECIP_LEGEND.items },
+                },
+                {
+                    name: 'Low cloud',
+                    math: String.raw`\mathrm{Max}(\text{Low cloud})_{t_0-t}`,
+                    legend: {
+                        units: 'max RH %',
+                        items: [
+                            { color: '#ffffff', label: '85–90' },
+                            { color: '#c86400', label: '90–95' },
+                            { color: '#aa5500', label: '95–97.5' },
+                            { color: '#6d3600', label: '97.5–100' },
+                        ],
+                    },
+                },
+                {
+                    name: 'Drizzle',
+                    math: String.raw`\mathrm{Max}(\text{Drizzle})_{t_0-t}`,
+                    legend: {
+                        units: 'avg RH %',
+                        items: [{ color: '#00ff00', label: '95–100' }],
+                    },
+                },
+                {
+                    name: 'Fog',
+                    math: String.raw`\mathrm{Max}(\text{Fog})_{t_0-t}`,
+                    legend: FOG_LEGEND,
+                },
+                {
+                    name: 'Thunderstorm precipitation',
+                    math: String.raw`\sum_{t_0}^{t}(\text{Thunderstorm precipitation})`,
+                    legend: {
+                        units: 'mm',
+                        items: [
+                            { color: '#00ff00', label: '0.1–0.3' },
+                            { color: '#fffb00', label: '0.5–1' },
+                            { color: '#ff9900', label: '5–7.5' },
+                            { color: '#ff0000', label: '15–20' },
+                            { color: '#ff20d6', label: '40–45' },
+                            { color: '#1c14ff', label: '100–300' },
+                        ],
+                    },
+                },
+                {
+                    name: 'Icing',
+                    math: String.raw`\mathrm{Max}(\text{Icing blw 10000ft})_{t_0-t}`,
+                    legend: {
+                        units: '%',
+                        items: [
+                            { color: '#00ccff', label: '95–97.5' },
+                            { color: '#00ffff', label: '97.5–100' },
+                        ],
+                    },
+                },
+                {
+                    name: 'Thermals',
+                    math: String.raw`\mathrm{Max}(\text{Thermals})_{t_0-t}`,
+                    legend: {
+                        units: 'ft AGL',
+                        items: [
+                            { color: '#ffcc00', label: '6000–10000' },
+                            { color: '#ff6600', label: '10000+' },
+                        ],
+                    },
+                },
+                {
+                    name: 'Small hail',
+                    math: String.raw`\sum_{t_0}^{t}(\text{Small hail})`,
+                    legend: {
+                        units: 'mm',
+                        items: [
+                            { color: '#e0f7fa', label: '0.1–0.5' },
+                            { color: '#4dd0e1', label: '2.5–5' },
+                            { color: '#006064', label: '20–40' },
+                            { color: '#00363a', label: '40+' },
+                        ],
+                    },
+                },
+                {
+                    name: 'Freezing fog',
+                    math: String.raw`\mathrm{Max}(\text{Freezing fog})_{t_0-t}`,
+                    legend: FOG_LEGEND,
+                },
+                {
+                    name: 'Snow',
+                    math: String.raw`\sum_{t_0}^{t}(\text{Snow})`,
+                    legend: {
+                        units: 'mm',
+                        items: [
+                            { color: '#00b7ff', label: '0.1–0.2' },
+                            { color: '#7ee3ff', label: '1–2' },
+                            { color: '#ffffff', label: '8+' },
+                        ],
+                    },
+                },
+                {
+                    name: 'Shear and lee turbulence',
+                    math: String.raw`\mathrm{Max}(\text{Shear and lee turbulence})_{t_0-t}`,
+                    legend: {
+                        units: 'category',
+                        items: [
+                            { color: '#ffcc00', label: 'MOD' },
+                            { color: '#ff6600', label: 'MOD/SEV' },
+                            { color: '#ff0000', label: 'SEV' },
+                        ],
+                    },
+                },
+                {
+                    name: 'MTW',
+                    math: String.raw`\mathrm{Max}(\text{MTW})_{t_0-t}`,
+                    legend: {
+                        units: 'm/s',
+                        items: [
+                            { color: '#ff9900', label: '0.2–0.4' },
+                            { color: '#ff0000', label: '0.4–0.6' },
+                            { color: '#ff00ff', label: '0.6+' },
+                        ],
+                    },
+                },
+            ],
+        },
+    },
 };
 
 function isQuadCategory(category) {
@@ -370,7 +870,8 @@ const categoryHotkeys = {
     f: 'BG',
     l: 'TS',
     a: 'Airmass',
-    t: 'Turb'
+    t: 'Turb',
+    p: 'Policy',
 };
 
 const LEGEND_PREFS_KEY = 'avmaps.legendPrefs.v1';
@@ -666,6 +1167,95 @@ const FALLBACK_LEGENDS = {
             ],
         },
     },
+    Policy: {
+        left: {
+            title: 'Policy',
+            fields: [
+                { id: 'precip', label: 'Precipitation', units: 'mm', items: PRECIP_LEGEND.items },
+                {
+                    id: 'low_cloud',
+                    label: 'Low cloud',
+                    units: 'max RH %',
+                    items: [
+                        { color: '#ffffff', label: '85-90' },
+                        { color: '#c86400', label: '90-95' },
+                        { color: '#aa5500', label: '95-97.5' },
+                        { color: '#6d3600', label: '97.5-100' },
+                    ],
+                },
+                { id: 'drizzle', label: 'Drizzle', units: 'avg RH %', items: [{ color: '#00ff00', label: '95-100' }] },
+                { id: 'fog', label: 'Fog', units: 'category', items: FOG_LEGEND.items },
+                {
+                    id: 'ts_precip',
+                    label: 'Thunderstorm precipitation',
+                    units: 'mm',
+                    items: [
+                        { color: '#00ff00', label: '0.1-0.3' },
+                        { color: '#fffb00', label: '0.5-1' },
+                        { color: '#ff9900', label: '5-7.5' },
+                        { color: '#ff0000', label: '15-20' },
+                    ],
+                },
+                {
+                    id: 'icing',
+                    label: 'Icing',
+                    units: '%',
+                    items: [
+                        { color: '#00ccff', label: '95-97.5' },
+                        { color: '#00ffff', label: '97.5-100' },
+                    ],
+                },
+                {
+                    id: 'thermals',
+                    label: 'Thermals',
+                    units: 'ft AGL',
+                    items: [
+                        { color: '#ffcc00', label: '6000-10000' },
+                        { color: '#ff6600', label: '10000+' },
+                    ],
+                },
+                {
+                    id: 'small_hail',
+                    label: 'Small hail',
+                    units: 'mm',
+                    items: [
+                        { color: '#e0f7fa', label: '0.1-0.5' },
+                        { color: '#006064', label: '20-40' },
+                    ],
+                },
+                { id: 'freezing_fog', label: 'Freezing fog', units: 'category', items: FOG_LEGEND.items },
+                {
+                    id: 'snow',
+                    label: 'Snow',
+                    units: 'mm',
+                    items: [
+                        { color: '#00b7ff', label: '0.1-0.2' },
+                        { color: '#ffffff', label: '8+' },
+                    ],
+                },
+                {
+                    id: 'shear_lee',
+                    label: 'Shear and lee turbulence',
+                    units: 'category',
+                    items: [
+                        { color: '#ffcc00', label: 'MOD' },
+                        { color: '#ff6600', label: 'MOD/SEV' },
+                        { color: '#ff0000', label: 'SEV' },
+                    ],
+                },
+                {
+                    id: 'mtw',
+                    label: 'MTW',
+                    units: 'm/s',
+                    items: [
+                        { color: '#ff9900', label: '0.2-0.4' },
+                        { color: '#ff0000', label: '0.4-0.6' },
+                        { color: '#ff00ff', label: '0.6+' },
+                    ],
+                },
+            ],
+        },
+    },
 };
 
 let currentCategory = 'BG';
@@ -711,15 +1301,28 @@ let loadingStatus;
 let infoBtn;
 let infoOverlay;
 let infoCloseBtn;
+let infoTabControls;
+let infoTabLayers;
+let infoPaneControls;
+let infoPaneLayers;
+let infoLayersBody;
+let infoActiveTab = 'controls';
 let legendStrip;
 let legendContent;
 let legendToggleBtn;
+let legendHelpBtn;
 let mapSwapLoading;
 let mapSwapGeneration = 0;
 let controlsPanel;
 
 let legendEnabled = false;
 let hiddenLegendFields = {};
+const policyStacks = { gfs: null, icon: null };
+const policyStackPromises = { gfs: null, icon: null };
+let policyPresets;
+let policyLayersPanel;
+let policyLayersList;
+let policyOverlayRaf = 0;
 
 function ensureDomainCache(domainId) {
     if (!framePairsCache[domainId]) {
@@ -845,6 +1448,23 @@ function getFieldAccentColor(field) {
     return '#7d9ecf';
 }
 
+function appendFieldSwatch(parent, field) {
+    const barbItem = (field.items || []).find(item => item?.pattern === 'barb');
+    const crosshatchItem = (field.items || []).find(item => item?.pattern === 'crosshatch');
+    if (barbItem) {
+        parent.appendChild(createBarbSwatch(barbItem.color));
+        return;
+    }
+    if (crosshatchItem) {
+        parent.appendChild(createCrosshatchSwatch(crosshatchItem.color));
+        return;
+    }
+    const dot = document.createElement('span');
+    dot.className = 'legend-field-toggle-dot';
+    dot.style.setProperty('--legend-dot-color', getFieldAccentColor(field));
+    parent.appendChild(dot);
+}
+
 function createBarbSwatch(color) {
     const c = color || '#2b0000';
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -866,11 +1486,11 @@ function createBarbSwatch(color) {
         return line;
     };
 
-    // Staff
-    svg.appendChild(makeLine(2, 6, 18, 6));
-    // Two barbs at the left end, slanted back (away from rightward motion)
-    svg.appendChild(makeLine(2, 6, 0.5, 10));
-    svg.appendChild(makeLine(5.5, 6, 4, 10));
+    // Tip at right (direction of travel). Feathers sit at the upwind end
+    // on the right-hand side of travel, matching SH map barbs.
+    svg.appendChild(makeLine(3, 4, 18, 4));
+    svg.appendChild(makeLine(3, 4, 7, 11));
+    svg.appendChild(makeLine(6.5, 4, 10.5, 11));
 
     return svg;
 }
@@ -1047,43 +1667,37 @@ function renderLegend() {
         togglesNode.className = 'legend-field-toggles';
 
         const fieldsToRender = (panelConfig.fields || []).filter(field => !EXCLUDED_LEGEND_FIELD_IDS.has(field?.id));
+        const interactive = !isPolicyCategory();
 
         fieldsToRender.forEach((field, index) => {
             const fieldId = field.id || `${panelKey}-${index}`;
             const hidden = getFieldHiddenState(currentCategory, panelKey, fieldId);
 
-            const toggleBtn = document.createElement('button');
-            toggleBtn.type = 'button';
-            toggleBtn.className = `legend-field-toggle${hidden ? ' is-disabled' : ''}`;
-            toggleBtn.setAttribute('aria-pressed', hidden ? 'false' : 'true');
-
-            const barbItem = (field.items || []).find(item => item?.pattern === 'barb');
-            const crosshatchItem = (field.items || []).find(item => item?.pattern === 'crosshatch');
-            if (barbItem) {
-                const barbSvg = createBarbSwatch(barbItem.color);
-                toggleBtn.appendChild(barbSvg);
-            } else if (crosshatchItem) {
-                const hatchSwatch = createCrosshatchSwatch(crosshatchItem.color);
-                toggleBtn.appendChild(hatchSwatch);
+            const itemNode = document.createElement(interactive ? 'button' : 'div');
+            if (interactive) {
+                itemNode.type = 'button';
+                itemNode.className = `legend-field-toggle${hidden ? ' is-disabled' : ''}`;
+                itemNode.setAttribute('aria-pressed', hidden ? 'false' : 'true');
             } else {
-                const dot = document.createElement('span');
-                dot.className = 'legend-field-toggle-dot';
-                dot.style.setProperty('--legend-dot-color', getFieldAccentColor(field));
-                toggleBtn.appendChild(dot);
+                itemNode.className = 'legend-field-toggle legend-field-key';
             }
+
+            appendFieldSwatch(itemNode, field);
 
             const toggleLabel = document.createElement('span');
             toggleLabel.className = 'legend-field-toggle-label';
             toggleLabel.textContent = formatLegendLabel(field.label || fieldId);
-            toggleBtn.appendChild(toggleLabel);
+            itemNode.appendChild(toggleLabel);
 
-            toggleBtn.addEventListener('click', () => {
+            if (interactive) {
+                itemNode.addEventListener('click', () => {
                 setFieldHiddenState(currentCategory, panelKey, fieldId, !hidden);
                 saveLegendPreferences();
                 renderLegend();
             });
+            }
 
-            togglesNode.appendChild(toggleBtn);
+            togglesNode.appendChild(itemNode);
         });
 
         panelNode.appendChild(togglesNode);
@@ -1141,7 +1755,9 @@ function setMaxFramesForCurrentSelection() {
     frameRangeEndSlider.min = 1;
     frameRangeEndSlider.max = maxFrames;
     frameRangeEndSlider.value = selectedRangeEnd;
-    currentFrame = clampFrameToSelectedRange(currentFrame);
+    currentFrame = isPolicyCategory()
+        ? selectedRangeEnd
+        : clampFrameToSelectedRange(currentFrame);
     frameSlider.value = currentFrame;
     updateSelectedRangeHighlight();
     updateRangeTimeDisplay();
@@ -1244,6 +1860,7 @@ function updateRangeTimeDisplay() {
     if (framePairs.length === 0) {
         rangeStartTimeLabel.textContent = '--';
         rangeEndTimeLabel.textContent = '--';
+        syncPolicyPresetActiveState();
         return;
     }
 
@@ -1251,6 +1868,7 @@ function updateRangeTimeDisplay() {
     const endFramePair = framePairs[selectedRangeEnd - 1];
     rangeStartTimeLabel.textContent = formatDateForRangeDisplay(getValidDateForFramePair(startFramePair));
     rangeEndTimeLabel.textContent = formatDateForRangeDisplay(getValidDateForFramePair(endFramePair));
+    syncPolicyPresetActiveState();
 }
 
 function updateCurrentTimestepDisplay(framePair = null) {
@@ -1264,7 +1882,9 @@ function updateCurrentTimestepDisplay(framePair = null) {
 function updateRangeStartValue(value) {
     selectedRangeStart = Math.max(1, Math.min(value, selectedRangeEnd));
     frameRangeStartSlider.value = selectedRangeStart;
-    currentFrame = clampFrameToSelectedRange(currentFrame);
+    currentFrame = isPolicyCategory()
+        ? selectedRangeEnd
+        : clampFrameToSelectedRange(currentFrame);
     frameSlider.value = currentFrame;
     updateSelectedRangeHighlight();
     updateRangeTimeDisplay();
@@ -1274,7 +1894,9 @@ function updateRangeStartValue(value) {
 function updateRangeEndValue(value) {
     selectedRangeEnd = Math.min(maxFrames, Math.max(value, selectedRangeStart));
     frameRangeEndSlider.value = selectedRangeEnd;
-    currentFrame = clampFrameToSelectedRange(currentFrame);
+    currentFrame = isPolicyCategory()
+        ? selectedRangeEnd
+        : clampFrameToSelectedRange(currentFrame);
     frameSlider.value = currentFrame;
     updateSelectedRangeHighlight();
     updateRangeTimeDisplay();
@@ -1310,11 +1932,20 @@ function initializeElements() {
     infoBtn = document.getElementById('info-btn');
     infoOverlay = document.getElementById('info-overlay');
     infoCloseBtn = document.getElementById('info-close-btn');
+    infoTabControls = document.getElementById('info-tab-controls');
+    infoTabLayers = document.getElementById('info-tab-layers');
+    infoPaneControls = document.getElementById('info-pane-controls');
+    infoPaneLayers = document.getElementById('info-pane-layers');
+    infoLayersBody = document.getElementById('info-layers-body');
     legendStrip = document.getElementById('legend-strip');
     legendContent = document.getElementById('legend-content');
     legendToggleBtn = document.getElementById('legend-toggle-btn');
+    legendHelpBtn = document.getElementById('legend-help-btn');
     mapSwapLoading = document.getElementById('map-swap-loading');
     controlsPanel = document.querySelector('.controls');
+    policyPresets = document.getElementById('policy-presets');
+    policyLayersPanel = document.getElementById('policy-layers-panel');
+    policyLayersList = document.getElementById('policy-layers-list');
 }
 
 function beginMapSwapLoading() {
@@ -1403,8 +2034,183 @@ function isInfoModalOpen() {
     return infoOverlay && !infoOverlay.classList.contains('hidden');
 }
 
-function openInfoModal() {
+function getVisibleLayerColumns() {
+    const columns = imageConfig[currentCategory]?.columns || [];
+    const maxCol = getAxisMaxValue(getImagePairEl(), 'col');
+    if (maxCol === '0' || maxCol === '1') {
+        const column = columns[Number(maxCol)];
+        return column ? [column] : columns;
+    }
+    return columns;
+}
+
+function renderLayerMath(latex) {
+    const source = String(latex || '').trim();
+    if (window.katex) {
+        return window.katex.renderToString(source, {
+            throwOnError: false,
+            displayMode: true,
+            output: 'html',
+        });
+    }
+    return `<code class="info-layer-math-fallback">${source
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')}</code>`;
+}
+
+function splitLegendLabel(label) {
+    const text = String(label || '');
+    const parts = text.split(/[–-]/);
+    if (parts.length >= 2) {
+        return { start: parts[0].trim(), end: parts.slice(1).join('–').trim() };
+    }
+    return { start: text, end: text };
+}
+
+function pickColorbarTickIndices(count, maxTicks = 7) {
+    if (count <= maxTicks) {
+        return Array.from({ length: count }, (_, index) => index);
+    }
+    const picked = new Set([0, count - 1]);
+    const steps = maxTicks - 1;
+    for (let i = 1; i < steps; i += 1) {
+        picked.add(Math.round((i * (count - 1)) / steps));
+    }
+    return [...picked].sort((a, b) => a - b);
+}
+
+function renderLayerLegendScale(legend) {
+    const scale = document.createElement('div');
+    scale.className = 'info-layer-scale';
+    const items = legend?.items || [];
+    if (legend?.units) {
+        const units = document.createElement('span');
+        units.className = 'info-layer-scale-units';
+        units.textContent = legend.units;
+        scale.appendChild(units);
+    }
+
+    const symbolItem = items.find((item) => item.pattern === 'barb' || item.pattern === 'crosshatch');
+    if (symbolItem) {
+        const chip = document.createElement('span');
+        chip.className = 'info-layer-scale-item';
+        chip.appendChild(symbolItem.pattern === 'barb'
+            ? createBarbSwatch(symbolItem.color)
+            : createCrosshatchSwatch(symbolItem.color));
+        const label = document.createElement('span');
+        label.textContent = symbolItem.label || '';
+        chip.appendChild(label);
+        scale.appendChild(chip);
+        return scale;
+    }
+
+    const colorItems = items.filter((item) => item.color);
+    if (colorItems.length === 0) {
+        return scale;
+    }
+
+    const bar = document.createElement('div');
+    bar.className = 'info-colorbar';
+    const ramp = document.createElement('div');
+    ramp.className = 'info-colorbar-ramp';
+    const stops = colorItems.map((item, index) => {
+        const start = ((index / colorItems.length) * 100).toFixed(2);
+        const end = (((index + 1) / colorItems.length) * 100).toFixed(2);
+        return `${item.color} ${start}%, ${item.color} ${end}%`;
+    });
+    ramp.style.background = `linear-gradient(to right, ${stops.join(', ')})`;
+    bar.appendChild(ramp);
+
+    const ticks = document.createElement('div');
+    ticks.className = 'info-colorbar-ticks';
+    const numeric = colorItems.every((item) => /[–-]|\+$/.test(item.label || ''));
+    if (numeric) {
+        ticks.classList.add('is-numeric');
+        const edges = colorItems.map((item, index) => {
+            const parts = splitLegendLabel(item.label);
+            return index === 0 ? [parts.start, parts.end] : [parts.end];
+        }).flat();
+        const lastIndex = Math.max(edges.length - 1, 1);
+        pickColorbarTickIndices(edges.length).forEach((index) => {
+            const tick = document.createElement('span');
+            tick.textContent = edges[index];
+            tick.style.left = `${(index / lastIndex) * 100}%`;
+            ticks.appendChild(tick);
+        });
+    } else {
+        ticks.style.gridTemplateColumns = `repeat(${colorItems.length}, minmax(0, 1fr))`;
+        colorItems.forEach((item) => {
+            const tick = document.createElement('span');
+            tick.textContent = item.label;
+            ticks.appendChild(tick);
+        });
+    }
+    bar.appendChild(ticks);
+    scale.appendChild(bar);
+    return scale;
+}
+
+function renderInfoLayerLogic() {
+    if (!infoLayersBody) {
+        return;
+    }
+
+    infoLayersBody.replaceChildren();
+
+    const layers = getVisibleLayerColumns().flatMap((column) => (
+        LAYER_LOGIC[currentCategory]?.[column.id]?.layers
+        || [{ name: 'Layers', math: String.raw`\text{No layer notes are recorded for this product.}` }]
+    ));
+
+    const wrap = document.createElement('div');
+    wrap.className = 'info-layer-table-wrap';
+    const table = document.createElement('table');
+    table.className = 'info-layer-table';
+    const tbody = document.createElement('tbody');
+
+    layers.forEach((layer) => {
+        const row = document.createElement('tr');
+        const nameCell = document.createElement('td');
+        const logicCell = document.createElement('td');
+        const legendCell = document.createElement('td');
+        nameCell.textContent = layer.name;
+        logicCell.innerHTML = renderLayerMath(layer.math || layer.text || '');
+        legendCell.className = 'info-layer-legend-cell';
+        legendCell.appendChild(renderLayerLegendScale(layer.legend));
+        row.append(nameCell, logicCell, legendCell);
+        tbody.appendChild(row);
+    });
+
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    infoLayersBody.appendChild(wrap);
+}
+
+function setInfoTab(tab) {
+    infoActiveTab = tab === 'layers' ? 'layers' : 'controls';
+    const isLayers = infoActiveTab === 'layers';
+    infoTabControls?.classList.toggle('active', !isLayers);
+    infoTabLayers?.classList.toggle('active', isLayers);
+    infoTabControls?.setAttribute('aria-selected', String(!isLayers));
+    infoTabLayers?.setAttribute('aria-selected', String(isLayers));
+    infoPaneControls?.classList.toggle('hidden', isLayers);
+    infoPaneLayers?.classList.toggle('hidden', !isLayers);
+    if (infoPaneControls) {
+        infoPaneControls.hidden = isLayers;
+    }
+    if (infoPaneLayers) {
+        infoPaneLayers.hidden = !isLayers;
+    }
+    if (isLayers) {
+        renderInfoLayerLogic();
+    }
+}
+
+function openInfoModal(tab) {
     stopAnimation();
+    renderInfoLayerLogic();
+    setInfoTab(tab || infoActiveTab);
     infoOverlay.classList.remove('hidden');
     infoOverlay.setAttribute('aria-hidden', 'false');
 }
@@ -1492,7 +2298,7 @@ function getWrappedFrameIndex(index, frameCount) {
 }
 
 function collectFrameSources(domainId, category) {
-    const framePairs = framePairsCache[domainId]?.[category] || [];
+            const framePairs = framePairsCache[domainId]?.[category] || [];
     const sources = [];
     framePairs.forEach((framePair) => {
         getFrameImagePaths(framePair).forEach((src) => {
@@ -1507,17 +2313,17 @@ function collectFrameSources(domainId, category) {
 function collectDecodeWindowSources(centerFrame) {
     const targetSources = new Set();
     const framePairs = getCurrentFramePairs();
-    const frameCount = framePairs.length;
-    if (frameCount === 0) {
+            const frameCount = framePairs.length;
+            if (frameCount === 0) {
         return targetSources;
-    }
+            }
 
-    for (let offset = -DECODE_WINDOW_RADIUS; offset <= DECODE_WINDOW_RADIUS; offset += 1) {
-        const frameIndex = getWrappedFrameIndex(centerFrame + offset, frameCount);
-        const framePair = framePairs[frameIndex - 1];
-        if (!framePair) {
-            continue;
-        }
+            for (let offset = -DECODE_WINDOW_RADIUS; offset <= DECODE_WINDOW_RADIUS; offset += 1) {
+                const frameIndex = getWrappedFrameIndex(centerFrame + offset, frameCount);
+                const framePair = framePairs[frameIndex - 1];
+                if (!framePair) {
+                    continue;
+                }
         getFrameImagePaths(framePair).forEach((src) => {
             if (src) {
                 targetSources.add(src);
@@ -1557,8 +2363,8 @@ async function preloadSources(sources, onProgress) {
         while (nextIndex < unique.length) {
             const src = unique[nextIndex];
             nextIndex += 1;
-            await preloadImageSource(src);
-            completedCount += 1;
+        await preloadImageSource(src);
+        completedCount += 1;
             onProgress?.(completedCount, unique.length);
         }
     };
@@ -1580,7 +2386,7 @@ async function preloadRemainingInBackground() {
     const prioritized = [];
 
     const takeSources = async (domainId, category) => {
-        const framePairs = await loadCategoryFrames(domainId, category);
+            const framePairs = await loadCategoryFrames(domainId, category);
         framePairs.forEach((framePair) => {
             getFrameImagePaths(framePair).forEach((src) => {
                 if (!src || seen.has(src)) {
@@ -1619,6 +2425,507 @@ async function preloadRemainingInBackground() {
     await preloadSources(prioritized);
 }
 
+function isPolicyCategory(category = currentCategory) {
+    return category === 'Policy';
+}
+
+function hexToRgba(hex, alpha) {
+    const raw = String(hex || '').replace('#', '');
+    if (raw.length < 6) {
+        return [0, 0, 0, alpha];
+    }
+    return [
+        parseInt(raw.slice(0, 2), 16),
+        parseInt(raw.slice(2, 4), 16),
+        parseInt(raw.slice(4, 6), 16),
+        alpha,
+    ];
+}
+
+function f16ToNumber(u16) {
+    const sign = (u16 & 0x8000) >> 15;
+    const exp = (u16 & 0x7c00) >> 10;
+    const frac = u16 & 0x03ff;
+    if (exp === 0) {
+        return (sign ? -1 : 1) * (2 ** -14) * (frac / 1024);
+    }
+    if (exp === 31) {
+        return frac ? NaN : (sign ? -Infinity : Infinity);
+    }
+    return (sign ? -1 : 1) * (2 ** (exp - 15)) * (1 + frac / 1024);
+}
+
+function decodePolicyPlane(bytes, dtype, cellCount) {
+    const out = new Float32Array(cellCount);
+    if (dtype === 'f16') {
+        const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+        if (typeof view.getFloat16 === 'function') {
+            for (let i = 0; i < cellCount; i += 1) {
+                out[i] = view.getFloat16(i * 2, true);
+            }
+            return out;
+        }
+        for (let i = 0; i < cellCount; i += 1) {
+            out[i] = f16ToNumber(view.getUint16(i * 2, true));
+        }
+        return out;
+    }
+    if (dtype === 'u8') {
+        for (let i = 0; i < cellCount; i += 1) {
+            const value = bytes[i];
+            out[i] = value === 255 ? NaN : value;
+        }
+        return out;
+    }
+    if (dtype === 'u16') {
+        const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+        for (let i = 0; i < cellCount; i += 1) {
+            const value = view.getUint16(i * 2, true);
+            out[i] = value === 65535 ? NaN : value;
+        }
+        return out;
+    }
+    return out;
+}
+
+function parsePolicyStack(meta, buffer) {
+    const hours = (meta.hours || []).map((hour) => Number(hour));
+    const nlat = Number(meta.nlat);
+    const nlon = Number(meta.nlon);
+    const cellCount = nlat * nlon;
+    const layers = {};
+    const raw = new Uint8Array(buffer);
+    (meta.layers || []).forEach((layer) => {
+        const hourSize = layer.length / Math.max(hours.length, 1);
+        const planes = hours.map((_, index) => {
+            const start = layer.offset + index * hourSize;
+            const slice = raw.subarray(start, start + hourSize);
+            return decodePolicyPlane(slice, layer.dtype, cellCount);
+        });
+        layers[layer.id] = {
+            reduce: layer.reduce,
+            dtype: layer.dtype,
+            planes,
+        };
+    });
+    return {
+        hours,
+        nlat,
+        nlon,
+        lat0: Number(meta.lat0),
+        dlat: Number(meta.dlat),
+        lon0: Number(meta.lon0),
+        dlon: Number(meta.dlon),
+        layers,
+    };
+}
+
+async function loadPolicyStack(model) {
+    if (policyStacks[model]) {
+        return policyStacks[model];
+    }
+    if (policyStackPromises[model]) {
+        return policyStackPromises[model];
+    }
+    const metaUrl = frameManifest?.policy?.[model];
+    if (!metaUrl) {
+        return null;
+    }
+    policyStackPromises[model] = (async () => {
+        const metaResponse = await fetch(metaUrl, { cache: 'no-store' });
+        if (!metaResponse.ok) {
+            throw new Error(`Policy ${model} metadata ${metaResponse.status}`);
+        }
+        const meta = await metaResponse.json();
+        const binUrl = metaUrl.replace(/[^/]+$/, meta.bin || `${model}.bin`);
+        const binResponse = await fetch(binUrl, { cache: 'no-store' });
+        if (!binResponse.ok) {
+            throw new Error(`Policy ${model} stack ${binResponse.status}`);
+        }
+        const stack = parsePolicyStack(meta, await binResponse.arrayBuffer());
+        policyStacks[model] = stack;
+        return stack;
+    })().catch((error) => {
+        console.warn(`Unable to load Policy ${model} stack:`, error);
+        policyStackPromises[model] = null;
+        return null;
+    });
+    return policyStackPromises[model];
+}
+
+async function ensurePolicyStacks() {
+    if (!isPolicyCategory()) {
+        return;
+    }
+    await loadFrameManifest();
+    await Promise.all([loadPolicyStack('gfs'), loadPolicyStack('icon')]);
+}
+
+function getSelectedForecastHours() {
+    const framePairs = getCurrentFramePairs();
+    const hours = [];
+    for (let index = selectedRangeStart; index <= selectedRangeEnd; index += 1) {
+        const hour = Number(framePairs[index - 1]?.hour);
+        if (Number.isFinite(hour)) {
+            hours.push(hour);
+        }
+    }
+    return hours;
+}
+
+function reducePolicyLayer(stack, layerId, reduceMode, selectedHours) {
+    const layer = stack?.layers?.[layerId];
+    if (!layer) {
+        return null;
+    }
+    const cellCount = stack.nlat * stack.nlon;
+    const result = new Float32Array(cellCount);
+    if (reduceMode === 'sum') {
+        result.fill(0);
+    } else {
+        result.fill(Number.NaN);
+    }
+    const hourIndex = new Map(stack.hours.map((hour, index) => [hour, index]));
+    selectedHours.forEach((hour) => {
+        const plane = layer.planes[hourIndex.get(hour)];
+        if (!plane) {
+            return;
+        }
+        for (let i = 0; i < cellCount; i += 1) {
+            const value = plane[i];
+            if (!Number.isFinite(value)) {
+                continue;
+            }
+            if (reduceMode === 'sum') {
+                result[i] += value;
+            } else if (!Number.isFinite(result[i]) || value > result[i]) {
+                result[i] = value;
+            }
+        }
+    });
+    if (reduceMode === 'sum') {
+        for (let i = 0; i < cellCount; i += 1) {
+            if (result[i] <= 0) {
+                result[i] = Number.NaN;
+            }
+        }
+    }
+    return result;
+}
+
+function colorizePolicyLayer(values, spec, nlat, nlon) {
+    const image = new ImageData(nlon, nlat);
+    const pixels = image.data;
+    const alpha = spec.alpha ?? 170;
+    for (let row = 0; row < nlat; row += 1) {
+        const srcRow = nlat - 1 - row;
+        for (let col = 0; col < nlon; col += 1) {
+            const value = values[srcRow * nlon + col];
+            const pixel = (row * nlon + col) * 4;
+            if (!Number.isFinite(value) || value <= 0) {
+                continue;
+            }
+            let color = null;
+            if (spec.discrete) {
+                color = spec.colors[Math.round(value)];
+            } else {
+                const edges = spec.edges || [];
+                for (let bin = 0; bin < edges.length - 1; bin += 1) {
+                    if (value >= edges[bin] && value < edges[bin + 1]) {
+                        color = spec.colors[bin];
+                        break;
+                    }
+                }
+                if (!color && value >= edges[edges.length - 2]) {
+                    color = spec.colors[spec.colors.length - 1];
+                }
+            }
+            if (!color) {
+                continue;
+            }
+            const [red, green, blue, pixelAlpha] = hexToRgba(color, alpha);
+            pixels[pixel] = red;
+            pixels[pixel + 1] = green;
+            pixels[pixel + 2] = blue;
+            pixels[pixel + 3] = pixelAlpha;
+        }
+    }
+    return image;
+}
+
+function getPolicyOverlayCanvas(panel) {
+    return document.querySelector(`.policy-overlay[data-panel="${panel}"]`);
+}
+
+function paintPolicyOverlay(panel, model) {
+    const canvas = getPolicyOverlayCanvas(panel);
+    const img = mapImagesByPanel[panel];
+    if (!canvas || !img) {
+        return;
+    }
+    const ctx = canvas.getContext('2d');
+    const panelEl = img.closest('.image-panel');
+    const imgRect = img.getBoundingClientRect();
+    const panelRect = panelEl?.getBoundingClientRect() || imgRect;
+    const width = imgRect.width;
+    const height = imgRect.height;
+    if (!width || !height) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        return;
+    }
+    const ratio = window.devicePixelRatio || 1;
+    canvas.style.left = `${imgRect.left - panelRect.left}px`;
+    canvas.style.top = `${imgRect.top - panelRect.top}px`;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    canvas.width = Math.round(width * ratio);
+    canvas.height = Math.round(height * ratio);
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+
+    const stack = policyStacks[model];
+    const georef = getDomainGeoref();
+    if (!stack || !georef || !isPolicyCategory()) {
+        return;
+    }
+
+    const box = getDisplayedImageContentBox(img);
+    const destLeft = box.left - imgRect.left + georef.axesFraction.left * box.width;
+    const destTop = box.top - imgRect.top + georef.axesFraction.top * box.height;
+    const destWidth = georef.axesFraction.width * box.width;
+    const destHeight = georef.axesFraction.height * box.height;
+    if (destWidth <= 1 || destHeight <= 1) {
+        return;
+    }
+
+    const stackLatMax = stack.lat0 + (stack.nlat - 1) * stack.dlat;
+    const srcX = (georef.extent.lonMin - stack.lon0) / stack.dlon;
+    const srcW = (georef.extent.lonMax - georef.extent.lonMin) / stack.dlon;
+    const srcY = (stackLatMax - georef.extent.latMax) / stack.dlat;
+    const srcH = (georef.extent.latMax - georef.extent.latMin) / stack.dlat;
+    const selectedHours = getSelectedForecastHours();
+    const scratch = document.createElement('canvas');
+    scratch.width = stack.nlon;
+    scratch.height = stack.nlat;
+    const scratchCtx = scratch.getContext('2d');
+
+    POLICY_LAYER_RENDER.forEach((spec) => {
+        if (getFieldHiddenState('Policy', 'left', spec.id)) {
+            return;
+        }
+        const reduced = reducePolicyLayer(stack, spec.id, spec.reduce, selectedHours);
+        if (!reduced) {
+            return;
+        }
+        scratchCtx.putImageData(colorizePolicyLayer(reduced, spec, stack.nlat, stack.nlon), 0, 0);
+        ctx.imageSmoothingEnabled = spec.discrete ? false : true;
+        ctx.drawImage(scratch, srcX, srcY, srcW, srcH, destLeft, destTop, destWidth, destHeight);
+    });
+}
+
+function schedulePolicyOverlays() {
+    if (policyOverlayRaf) {
+        window.cancelAnimationFrame(policyOverlayRaf);
+    }
+    policyOverlayRaf = window.requestAnimationFrame(() => {
+        policyOverlayRaf = 0;
+        if (!isPolicyCategory()) {
+            ['topLeft', 'bottomLeft', 'topRight', 'bottomRight'].forEach((panel) => {
+                const canvas = getPolicyOverlayCanvas(panel);
+                canvas?.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
+            });
+            return;
+        }
+        paintPolicyOverlay('topLeft', 'gfs');
+        paintPolicyOverlay('bottomLeft', 'icon');
+    });
+}
+
+function frameIndexForHour(hour, mode = 'exact') {
+    const framePairs = getCurrentFramePairs();
+    const target = Number(hour);
+    const exact = framePairs.findIndex((pair) => Number(pair?.hour) === target);
+    if (exact >= 0) {
+        return exact + 1;
+    }
+    if (mode === 'start') {
+        const index = framePairs.findIndex((pair) => Number(pair?.hour) >= target);
+        return index >= 0 ? index + 1 : null;
+    }
+    if (mode === 'end') {
+        for (let index = framePairs.length - 1; index >= 0; index -= 1) {
+            if (Number(framePairs[index]?.hour) <= target) {
+                return index + 1;
+            }
+        }
+        return null;
+    }
+    return null;
+}
+
+function getPolicyRunInitDate() {
+    const categoryMap = frameManifest?.domains?.[currentDomain]?.categories || {};
+    const preferred = ['BG', 'TS', 'Airmass', 'Turbulence', currentCategory];
+    const seen = new Set();
+    for (const category of preferred) {
+        if (!category || seen.has(category)) {
+            continue;
+        }
+        seen.add(category);
+        const framePairs = categoryMap[category] || framePairsCache[currentDomain]?.[category] || [];
+        for (const framePair of framePairs) {
+            for (const path of getFrameImagePaths(framePair)) {
+                const initDate = parseValidDateFromFramePath(path);
+                if (initDate) {
+                    return initDate;
+                }
+            }
+        }
+    }
+    return null;
+}
+
+function formatPolicyDdhh(dateValue) {
+    if (!(dateValue instanceof Date) || Number.isNaN(dateValue.getTime())) {
+        return null;
+    }
+    const day = String(dateValue.getUTCDate()).padStart(2, '0');
+    const hour = String(dateValue.getUTCHours()).padStart(2, '0');
+    return `${day}${hour}`;
+}
+
+function getPolicyPeriodWindows(initDate) {
+    const hour = initDate instanceof Date && !Number.isNaN(initDate.getTime())
+        ? initDate.getUTCHours()
+        : 0;
+    if (hour === 6 || hour === 18) {
+        return [
+            { startHour: 11, endHour: 29 },
+            { startHour: 23, endHour: 41 },
+        ];
+    }
+    return [
+        { startHour: 17, endHour: 35 },
+        { startHour: 29, endHour: 47 },
+    ];
+}
+
+function updatePolicyPresetLabels() {
+    const initDate = getPolicyRunInitDate();
+    const windows = getPolicyPeriodWindows(initDate);
+    policyPresets?.querySelectorAll('.policy-preset-btn').forEach((button, index) => {
+        const periodIndex = Number(button.getAttribute('data-period-index'));
+        const window = windows[Number.isFinite(periodIndex) ? periodIndex : index];
+        if (!window) {
+            button.textContent = `-- to --Z`;
+            return;
+        }
+        button.setAttribute('data-start-hour', String(window.startHour));
+        button.setAttribute('data-end-hour', String(window.endHour));
+        if (!initDate) {
+            button.textContent = `-- to --Z`;
+            button.title = `+${window.startHour} to +${window.endHour}`;
+            return;
+        }
+        const startStamp = formatPolicyDdhh(new Date(initDate.getTime() + (window.startHour * 60 * 60 * 1000)));
+        const endStamp = formatPolicyDdhh(new Date(initDate.getTime() + (window.endHour * 60 * 60 * 1000)));
+        button.textContent = `${startStamp} to ${endStamp}Z`;
+        button.title = `+${window.startHour} to +${window.endHour}`;
+    });
+    syncPolicyPresetActiveState();
+}
+
+function applyPolicyPreset(startHour, endHour) {
+    const startIndex = frameIndexForHour(startHour, 'start');
+    const endIndex = frameIndexForHour(endHour, 'end');
+    if (!startIndex || !endIndex) {
+        return;
+    }
+    selectedRangeStart = Math.min(startIndex, endIndex);
+    selectedRangeEnd = Math.max(startIndex, endIndex);
+    if (frameRangeStartSlider) frameRangeStartSlider.value = selectedRangeStart;
+    if (frameRangeEndSlider) frameRangeEndSlider.value = selectedRangeEnd;
+    currentFrame = isPolicyCategory()
+        ? selectedRangeEnd
+        : clampFrameToSelectedRange(currentFrame);
+    if (frameSlider) frameSlider.value = currentFrame;
+    updateSelectedRangeHighlight();
+    updateRangeTimeDisplay();
+    updateImages();
+}
+
+function syncPolicyPresetActiveState() {
+    policyPresets?.querySelectorAll('.policy-preset-btn[data-start-hour]').forEach((button) => {
+        const startIndex = frameIndexForHour(Number(button.getAttribute('data-start-hour')), 'start');
+        const endIndex = frameIndexForHour(Number(button.getAttribute('data-end-hour')), 'end');
+        const active = Boolean(startIndex && endIndex
+            && startIndex === selectedRangeStart
+            && endIndex === selectedRangeEnd);
+        button.classList.toggle('is-active', active);
+        button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+}
+
+function getPolicyLegendFields() {
+    const config = getLegendConfigForCategory('Policy');
+    const fields = config?.left?.fields || FALLBACK_LEGENDS.Policy?.left?.fields || [];
+    return fields.filter((field) => field?.id && !EXCLUDED_LEGEND_FIELD_IDS.has(field.id));
+}
+
+function renderPolicyLayerList() {
+    if (!policyLayersList) {
+        return;
+    }
+
+    policyLayersList.innerHTML = '';
+    if (!isPolicyCategory()) {
+        return;
+    }
+
+    getPolicyLegendFields().forEach((field) => {
+        const hidden = getFieldHiddenState('Policy', 'left', field.id);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `policy-layer-toggle${hidden ? ' is-off' : ''}`;
+        button.setAttribute('aria-pressed', hidden ? 'false' : 'true');
+        appendFieldSwatch(button, field);
+        const label = document.createElement('span');
+        label.className = 'legend-field-toggle-label';
+        label.textContent = formatLegendLabel(field.label || field.id);
+        button.appendChild(label);
+        button.addEventListener('click', () => {
+            setFieldHiddenState('Policy', 'left', field.id, !hidden);
+            saveLegendPreferences();
+            renderPolicyLayerList();
+            renderLegend();
+            schedulePolicyOverlays();
+        });
+        policyLayersList.appendChild(button);
+    });
+}
+
+function syncPolicyMode() {
+    const enabled = isPolicyCategory();
+    document.body.classList.toggle('policy-mode', enabled);
+    window.SoundingViewer?.setToolsAvailable?.(!enabled);
+    updatePolicyPresetLabels();
+    renderPolicyLayerList();
+    if (playBtn) {
+        playBtn.disabled = enabled;
+        playBtn.title = enabled ? 'Playback is not used on Policy maps' : '';
+        if (enabled) {
+            stopAnimation();
+        }
+    }
+    if (enabled) {
+        currentFrame = selectedRangeEnd;
+        if (frameSlider) {
+            frameSlider.value = currentFrame;
+        }
+        requestAnimationFrame(schedulePolicyOverlays);
+    }
+}
+
 function updateImages() {
     const config = imageConfig[currentCategory];
     if (!config) {
@@ -1630,7 +2937,17 @@ function updateImages() {
     const framePairs = getCurrentFramePairs();
     if (framePairs.length === 0) {
         console.warn(`No ${currentCategory} frames available for domain ${currentDomain}.`);
+        Object.values(mapImagesByPanel).forEach((img) => {
+            if (!img) {
+                return;
+            }
+            img.removeAttribute('src');
+            img.removeAttribute('alt');
+            img.classList.remove('error', 'loaded');
+        });
         updateCurrentTimestepDisplay();
+        updateMapTableChrome();
+        schedulePolicyOverlays();
         return;
     }
 
@@ -1680,6 +2997,7 @@ function updateImages() {
 
     updateCurrentTimestepDisplay(framePair);
     updateMapTableChrome(framePair);
+    schedulePolicyOverlays();
 
     updateDecodeWindowsForAllStreams(currentFrame);
 
@@ -1834,6 +3152,7 @@ function notifyMapLayoutChanged() {
     requestAnimationFrame(() => {
         window.dispatchEvent(new Event('resize'));
         window.SoundingViewer?.syncPin?.();
+        schedulePolicyOverlays();
     });
 }
 
@@ -1928,7 +3247,7 @@ window.MapGeoref = {
 };
 
 function startAnimation() {
-    if (animationInterval) {
+    if (isPolicyCategory() || animationInterval) {
         return;
     }
 
@@ -1965,7 +3284,12 @@ function stopAnimation() {
 
 async function loadSelection(forceRefresh = false) {
     await loadCategoryFrames(currentDomain, currentCategory, forceRefresh);
+    if (isPolicyCategory()) {
+        await ensurePolicyStacks();
+    }
     setMaxFramesForCurrentSelection();
+    syncPolicyMode();
+    updatePolicyPresetLabels();
     updateImages();
     renderLegend();
 }
@@ -1977,6 +3301,9 @@ async function loadSelectionCovered() {
         await waitForVisibleMapsReady();
     } finally {
         endMapSwapLoading(token);
+        if (isPolicyCategory()) {
+            schedulePolicyOverlays();
+        }
     }
 }
 
@@ -1995,6 +3322,7 @@ async function switchCategory(category) {
     currentCategory = category;
     if (mobileCategorySelect) mobileCategorySelect.value = category;
     clearAxisMaximize();
+    syncPolicyMode();
     syncImagePairLayout();
     try {
         await loadSelectionCovered();
@@ -2062,6 +3390,17 @@ function setupEventListeners() {
         updateRangeEndValue(parseInt(this.value, 10));
     });
 
+    policyPresets?.querySelectorAll('.policy-preset-btn').forEach((button) => {
+        button.addEventListener('click', function() {
+            applyPolicyPreset(
+                Number(this.getAttribute('data-start-hour')),
+                Number(this.getAttribute('data-end-hour')),
+            );
+        });
+    });
+
+    window.addEventListener('resize', schedulePolicyOverlays);
+
     if (timezoneSelect) {
         timezoneSelect.addEventListener('change', function() {
             if (TIMEZONE_OPTIONS[this.value]) {
@@ -2074,6 +3413,9 @@ function setupEventListeners() {
     }
 
     playBtn.addEventListener('click', function() {
+        if (isPolicyCategory()) {
+            return;
+        }
         if (isPlaying) {
             stopAnimation();
         } else {
@@ -2117,6 +3459,14 @@ function setupEventListeners() {
         closeInfoModal();
     });
 
+    infoTabControls?.addEventListener('click', function() {
+        setInfoTab('controls');
+    });
+
+    infoTabLayers?.addEventListener('click', function() {
+        setInfoTab('layers');
+    });
+
     infoOverlay.addEventListener('click', function(event) {
         if (event.target === infoOverlay) {
             closeInfoModal();
@@ -2131,14 +3481,19 @@ function setupEventListeners() {
         });
     }
 
+    legendHelpBtn?.addEventListener('click', function() {
+        openInfoModal('layers');
+    });
+
     Object.values(mapImagesByPanel).forEach((img) => {
         if (!img) return;
         img.addEventListener('load', function() {
-            this.classList.add('loaded');
+        this.classList.add('loaded');
             window.SoundingViewer?.syncPin?.();
-        });
+            schedulePolicyOverlays();
+    });
         img.addEventListener('error', function() {
-            this.classList.add('error');
+        this.classList.add('error');
             console.warn(`Failed to load map image: ${this.src}`);
         });
         img.addEventListener('click', handleMapClick);
@@ -2193,36 +3548,47 @@ function setupEventListeners() {
         }
 
         if (isInfoModalOpen()) {
-            if (event.key === 'Escape') {
+            if (event.key === 'Escape' || event.key.toLowerCase() === 'i') {
                 closeInfoModal();
+                event.preventDefault();
+                return;
             }
-            if (event.key === 'Escape' || event.key === ' ' || event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key in domainHotkeys || event.key.toLowerCase() in categoryHotkeys) {
+            if (event.key === ' ' || event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key in domainHotkeys || event.key.toLowerCase() in categoryHotkeys) {
                 event.preventDefault();
             }
+            return;
+        }
+
+        if (event.key.toLowerCase() === 't' && event.shiftKey) {
+            if (!isPolicyCategory()) {
+                window.SoundingViewer?.toggleTool?.('table');
+            }
+                event.preventDefault();
             return;
         }
 
         const profileToolHotkeys = {
             s: 'sonde',
             h: 'hodograph',
-            p: 'table',
         };
         const profileToolId = profileToolHotkeys[event.key.toLowerCase()];
-        if (profileToolId && window.SoundingViewer?.toggleTool) {
-            window.SoundingViewer.toggleTool(profileToolId);
+        if (profileToolId && !event.shiftKey && window.SoundingViewer?.toggleTool) {
+            if (!isPolicyCategory()) {
+                window.SoundingViewer.toggleTool(profileToolId);
+            }
             event.preventDefault();
             return;
         }
 
         if (window.SoundingViewer?.isHelpOpen?.() && event.key === 'Escape') {
             window.SoundingViewer.closeHelp();
-            event.preventDefault();
+                event.preventDefault();
             return;
-        }
+            }
 
         if (window.SoundingViewer?.isOpen?.() && event.key === 'Escape') {
-            window.SoundingViewer.close();
-            event.preventDefault();
+                window.SoundingViewer.close();
+                event.preventDefault();
             return;
         }
 
@@ -2240,6 +3606,12 @@ function setupEventListeners() {
         }
 
         const lowerKey = event.key.toLowerCase();
+        if (lowerKey === 'i') {
+            openInfoModal();
+            event.preventDefault();
+            return;
+        }
+
         if (lowerKey in categoryHotkeys) {
             switchCategory(categoryHotkeys[lowerKey]);
             event.preventDefault();
@@ -2248,7 +3620,11 @@ function setupEventListeners() {
 
         switch (event.key) {
             case 'ArrowLeft':
-                if (currentFrame > selectedRangeStart) {
+                if (isPolicyCategory()) {
+                    if (selectedRangeEnd > selectedRangeStart) {
+                        updateRangeEndValue(selectedRangeEnd - 1);
+                    }
+                } else if (currentFrame > selectedRangeStart) {
                     currentFrame -= 1;
                     frameSlider.value = currentFrame;
                     updateImages();
@@ -2256,7 +3632,11 @@ function setupEventListeners() {
                 event.preventDefault();
                 break;
             case 'ArrowRight':
-                if (currentFrame < selectedRangeEnd) {
+                if (isPolicyCategory()) {
+                    if (selectedRangeEnd < maxFrames) {
+                        updateRangeEndValue(selectedRangeEnd + 1);
+                    }
+                } else if (currentFrame < selectedRangeEnd) {
                     currentFrame += 1;
                     frameSlider.value = currentFrame;
                     updateImages();
@@ -2264,10 +3644,12 @@ function setupEventListeners() {
                 event.preventDefault();
                 break;
             case ' ':
+                if (!isPolicyCategory()) {
                 if (isPlaying) {
                     stopAnimation();
                 } else {
                     startAnimation();
+                    }
                 }
                 event.preventDefault();
                 break;

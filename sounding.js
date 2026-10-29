@@ -38,7 +38,7 @@
             id: 'table',
             buttonId: 'profile-table-tool-btn',
             label: 'Profile table',
-            title: 'Profile table (P)',
+            title: 'Profile table (Shift+T)',
             panelLabel: 'Profile table',
         },
     };
@@ -90,6 +90,7 @@
     let aerodromes = [];
     let aerodromesLoadPromise = null;
     let toolEnabled = false;
+    let toolsAvailable = true;
     let panelOpen = false;
     let selectedModelId = DEFAULT_SOUNDING_MODEL;
     let lastProfile = null;
@@ -391,10 +392,12 @@
                 return;
             }
             const active = activeTool === toolId;
-            button.classList.toggle('active', active);
-            button.setAttribute('aria-pressed', active ? 'true' : 'false');
-            button.title = meta.title;
-            button.setAttribute('aria-label', meta.title);
+            button.disabled = !toolsAvailable;
+            button.classList.toggle('active', active && toolsAvailable);
+            button.setAttribute('aria-pressed', active && toolsAvailable ? 'true' : 'false');
+            button.setAttribute('aria-disabled', toolsAvailable ? 'false' : 'true');
+            button.title = toolsAvailable ? meta.title : 'Profile tools are not used on Policy maps';
+            button.setAttribute('aria-label', toolsAvailable ? meta.title : `${meta.title}, unavailable on Policy maps`);
         });
         if (panelEl) {
             panelEl.setAttribute('aria-label', PROFILE_TOOLS[activeTool]?.panelLabel || 'Profile panel');
@@ -441,6 +444,9 @@
     }
 
     function toggleTool(toolId) {
+        if (!toolsAvailable) {
+            return;
+        }
         if (activeTool === toolId) {
             setActiveTool(null);
             close();
@@ -450,12 +456,24 @@
     }
 
     function setToolEnabled(enabled) {
+        if (!toolsAvailable) {
+            return;
+        }
         if (enabled) {
             setActiveTool(activeTool || 'sonde');
             return;
         }
         setActiveTool(null);
         close();
+    }
+
+    function setToolsAvailable(available) {
+        toolsAvailable = Boolean(available);
+        if (!toolsAvailable) {
+            setActiveTool(null);
+            close();
+        }
+        syncToolUi();
     }
 
     function isToolEnabled() {
@@ -1151,8 +1169,8 @@
 
     function hideHoverReadout() {
         if (hoverEl) {
-            hoverEl.classList.add('hidden');
-            hoverEl.innerHTML = '';
+        hoverEl.classList.add('hidden');
+        hoverEl.innerHTML = '';
         }
         lastPointerCss = null;
         // Restore the base sounding / hodograph when the interactive overlay clears.
@@ -1221,25 +1239,25 @@
         }
 
         if (hoverEl) {
-            hoverEl.innerHTML = formatHoverReadout({
+        hoverEl.innerHTML = formatHoverReadout({
                 pressure,
                 temperature: Number.isFinite(level?.temperature) ? level.temperature : cursorTempC,
                 heightM: Number.isFinite(cursorHeightM) ? cursorHeightM : level?.height,
                 windDirDeg: level?.windDirDeg,
                 windSpeedKt: level?.windSpeedKt,
-            });
-            hoverEl.classList.remove('hidden');
+        });
+        hoverEl.classList.remove('hidden');
 
-            const tipW = hoverEl.offsetWidth || 160;
-            const tipH = hoverEl.offsetHeight || 72;
-            let left = x + 12;
-            let top = y + 12;
-            if (left + tipW > rect.width - 4) left = x - tipW - 12;
-            if (top + tipH > rect.height - 4) top = y - tipH - 12;
-            left = Math.max(4, Math.min(left, rect.width - tipW - 4));
-            top = Math.max(4, Math.min(top, rect.height - tipH - 4));
-            hoverEl.style.left = `${left}px`;
-            hoverEl.style.top = `${top}px`;
+        const tipW = hoverEl.offsetWidth || 160;
+        const tipH = hoverEl.offsetHeight || 72;
+        let left = x + 12;
+        let top = y + 12;
+        if (left + tipW > rect.width - 4) left = x - tipW - 12;
+        if (top + tipH > rect.height - 4) top = y - tipH - 12;
+        left = Math.max(4, Math.min(left, rect.width - tipW - 4));
+        top = Math.max(4, Math.min(top, rect.height - tipH - 4));
+        hoverEl.style.left = `${left}px`;
+        hoverEl.style.top = `${top}px`;
         }
     }
 
@@ -3659,7 +3677,7 @@
 
     function updateHodographHover(clientX, clientY) {
         if (!canvasEl || !lastHodoLayout || !lastProfile?.levels?.length) {
-            hideHoverReadout();
+        hideHoverReadout();
             return;
         }
         const { cx, cy, radius, points } = lastHodoLayout;
@@ -4136,7 +4154,7 @@
             }
             if (statusEl) {
                 statusEl.textContent = '';
-                statusEl.classList.remove('error');
+            statusEl.classList.remove('error');
             }
             setSoundingLoading(true);
             hideHoverReadout();
@@ -4162,8 +4180,8 @@
 
             metaEl.textContent = formatLatLon(pinLat, pinLon);
             if (statusEl) {
-                statusEl.textContent = '';
-                statusEl.classList.remove('error');
+            statusEl.textContent = '';
+            statusEl.classList.remove('error');
             }
             renderActiveView(profile);
             setSoundingLoading(false);
@@ -4180,7 +4198,7 @@
             }
             if (statusEl) {
                 statusEl.textContent = error?.message || 'Unable to load profile';
-                statusEl.classList.add('error');
+            statusEl.classList.add('error');
             }
             const ctx = canvasEl?.getContext('2d');
             if (ctx && canvasEl) {
@@ -4294,7 +4312,7 @@
         return { lat: pinLat, lon: pinLon };
     }
 
-        window.SoundingViewer = {
+    window.SoundingViewer = {
         openAt,
         close,
         isOpen,
@@ -4303,6 +4321,7 @@
         getPinLocation,
         isToolEnabled,
         setToolEnabled,
+        setToolsAvailable,
         toggleTool,
         getActiveTool,
         renderSkewT,

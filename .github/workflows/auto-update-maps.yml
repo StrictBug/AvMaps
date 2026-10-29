@@ -35,7 +35,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: avmaps-pages-deploy
+  group: ${{ github.ref == 'refs/heads/main' && 'avmaps-pages-deploy' || format('avmaps-branch-{0}', github.ref) }}
   cancel-in-progress: false
 
 jobs:
@@ -82,17 +82,26 @@ jobs:
 
           python scripts/auto_update_maps.py --model both --start-hour 6 --end-hour 48 --github-output "$GITHUB_OUTPUT" $FORCE_FLAG
 
-      - name: Report skipped deploy
+      - name: Report skipped generate
         if: steps.generate.outputs.should_deploy != 'true'
         run: |
-          echo "Skipping Pages deploy: ${{ steps.generate.outputs.reason }}"
+          echo "Skipping generate/publish: ${{ steps.generate.outputs.reason }}"
+
+      - name: Upload generated maps
+        if: steps.generate.outputs.should_deploy == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: maps-images
+          path: images/
+          if-no-files-found: error
+          retention-days: 5
 
       - name: Configure Pages
-        if: steps.generate.outputs.should_deploy == 'true'
+        if: github.ref == 'refs/heads/main' && steps.generate.outputs.should_deploy == 'true'
         uses: actions/configure-pages@v5
 
       - name: Assemble Pages artifact
-        if: steps.generate.outputs.should_deploy == 'true'
+        if: github.ref == 'refs/heads/main' && steps.generate.outputs.should_deploy == 'true'
         run: |
           rm -rf _site
           mkdir -p _site
@@ -103,14 +112,14 @@ jobs:
           cp -R images _site/
 
       - name: Upload Pages artifact
-        if: steps.generate.outputs.should_deploy == 'true'
+        if: github.ref == 'refs/heads/main' && steps.generate.outputs.should_deploy == 'true'
         uses: actions/upload-pages-artifact@v3
         with:
           path: _site
 
   deploy-pages:
     needs: build-site
-    if: needs.build-site.outputs.should_deploy == 'true'
+    if: github.ref == 'refs/heads/main' && needs.build-site.outputs.should_deploy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
 

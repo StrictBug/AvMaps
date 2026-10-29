@@ -74,6 +74,11 @@ CATEGORY_PANEL_DIRS = {
         'left': 'BG/US',
         'right': 'BG/ICON',
     },
+    'Policy': {
+        'layout': 'pair',
+        'left': 'Policy/GFS',
+        'right': 'Policy/ICON',
+    },
     'TS': {
         'layout': 'quad',
         'topLeft': 'TS/Flash density',
@@ -374,6 +379,137 @@ LEGEND_CONFIG = {
             ],
         },
     },
+    'Policy': {
+        'left': {
+            'title': 'Policy',
+            'fields': [
+                {
+                    'id': 'precip',
+                    'label': 'Precipitation',
+                    'units': 'mm',
+                    'items': [
+                        {'color': '#f0ff96', 'label': '0.1-0.2'},
+                        {'color': '#ffff00', 'label': '0.5-1'},
+                        {'color': '#009600', 'label': '5-7.5'},
+                        {'color': '#00c8ff', 'label': '10-15'},
+                        {'color': '#0000ff', 'label': '20-30'},
+                        {'color': '#ff6400', 'label': '30-40'},
+                        {'color': '#ff0000', 'label': '40-50'},
+                        {'color': '#320000', 'label': '50+'},
+                    ],
+                },
+                {
+                    'id': 'low_cloud',
+                    'label': 'Low cloud',
+                    'units': 'max RH %',
+                    'items': [
+                        {'color': '#ffffff', 'label': '85-90'},
+                        {'color': '#c86400', 'label': '90-95'},
+                        {'color': '#aa5500', 'label': '95-97.5'},
+                        {'color': '#6d3600', 'label': '97.5-100'},
+                    ],
+                },
+                {
+                    'id': 'drizzle',
+                    'label': 'Drizzle',
+                    'units': 'avg RH %',
+                    'items': [{'color': '#00ff00', 'label': '95-100'}],
+                },
+                {
+                    'id': 'fog',
+                    'label': 'Fog',
+                    'units': 'category',
+                    'items': [
+                        {'color': '#ff0000', 'label': 'F1'},
+                        {'color': '#ffaa7f', 'label': 'F2'},
+                        {'color': '#ffff00', 'label': 'F3'},
+                    ],
+                },
+                {
+                    'id': 'ts_precip',
+                    'label': 'Thunderstorm precipitation',
+                    'units': 'mm',
+                    'items': [
+                        {'color': '#00ff00', 'label': '0.1-0.3'},
+                        {'color': '#fffb00', 'label': '0.5-1'},
+                        {'color': '#ff9900', 'label': '5-7.5'},
+                        {'color': '#ff0000', 'label': '15-20'},
+                        {'color': '#ff20d6', 'label': '40-45'},
+                        {'color': '#1c14ff', 'label': '100-300'},
+                    ],
+                },
+                {
+                    'id': 'icing',
+                    'label': 'Icing',
+                    'units': '%',
+                    'items': [
+                        {'color': '#00ccff', 'label': '95-97.5'},
+                        {'color': '#00ffff', 'label': '97.5-100'},
+                    ],
+                },
+                {
+                    'id': 'thermals',
+                    'label': 'Thermals',
+                    'units': 'ft AGL',
+                    'items': [
+                        {'color': '#ffcc00', 'label': '6000-10000'},
+                        {'color': '#ff6600', 'label': '10000+'},
+                    ],
+                },
+                {
+                    'id': 'small_hail',
+                    'label': 'Small hail',
+                    'units': 'mm',
+                    'items': [
+                        {'color': '#e0f7fa', 'label': '0.1-0.5'},
+                        {'color': '#4dd0e1', 'label': '2.5-5'},
+                        {'color': '#006064', 'label': '20-40'},
+                        {'color': '#00363a', 'label': '40+'},
+                    ],
+                },
+                {
+                    'id': 'freezing_fog',
+                    'label': 'Freezing fog',
+                    'units': 'category',
+                    'items': [
+                        {'color': '#ff0000', 'label': 'F1'},
+                        {'color': '#ffaa7f', 'label': 'F2'},
+                        {'color': '#ffff00', 'label': 'F3'},
+                    ],
+                },
+                {
+                    'id': 'snow',
+                    'label': 'Snow',
+                    'units': 'mm',
+                    'items': [
+                        {'color': '#00b7ff', 'label': '0.1-0.2'},
+                        {'color': '#7ee3ff', 'label': '1-2'},
+                        {'color': '#ffffff', 'label': '8+'},
+                    ],
+                },
+                {
+                    'id': 'shear_lee',
+                    'label': 'Shear and lee turbulence',
+                    'units': 'category',
+                    'items': [
+                        {'color': '#ffcc00', 'label': 'MOD'},
+                        {'color': '#ff6600', 'label': 'MOD/SEV'},
+                        {'color': '#ff0000', 'label': 'SEV'},
+                    ],
+                },
+                {
+                    'id': 'mtw',
+                    'label': 'MTW',
+                    'units': 'm/s',
+                    'items': [
+                        {'color': '#ff9900', 'label': '0.2-0.4'},
+                        {'color': '#ff0000', 'label': '0.4-0.6'},
+                        {'color': '#ff00ff', 'label': '0.6+'},
+                    ],
+                },
+            ],
+        },
+    },
 }
 
 REMOVABLE_IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
@@ -389,6 +525,35 @@ OUTPUT_MAX_WIDTH_PX = 1280
 OUTPUT_DPI = OUTPUT_MAX_WIDTH_PX / BASE_FIGURE_WIDTH_INCHES
 # Must match savefig(bbox_inches='tight') padding used by save_output_figure.
 SAVEFIG_PAD_INCHES = 0.1
+
+POLICY_LAYER_SPECS = (
+    {'id': 'precip', 'dtype': 'f16', 'reduce': 'sum', 'groups': ('bg',)},
+    {'id': 'low_cloud', 'dtype': 'u8', 'reduce': 'max', 'groups': ('bg',)},
+    {'id': 'drizzle', 'dtype': 'u8', 'reduce': 'max', 'groups': ('bg',)},
+    {'id': 'fog', 'dtype': 'u8', 'reduce': 'max', 'groups': ('bg',)},
+    {'id': 'ts_precip', 'dtype': 'f16', 'reduce': 'sum', 'groups': ('ts_flash',)},
+    {'id': 'icing', 'dtype': 'u8', 'reduce': 'max', 'groups': ('airmass_fzl',)},
+    {'id': 'thermals', 'dtype': 'u16', 'reduce': 'max', 'groups': ('airmass_fzl',)},
+    {'id': 'small_hail', 'dtype': 'f16', 'reduce': 'sum', 'groups': ('airmass_fzl',)},
+    {'id': 'freezing_fog', 'dtype': 'u8', 'reduce': 'max', 'groups': ('airmass_fzl',)},
+    {'id': 'snow', 'dtype': 'f16', 'reduce': 'sum', 'groups': ('airmass_snow',)},
+    {'id': 'shear_lee', 'dtype': 'u8', 'reduce': 'max', 'groups': ('turb_wind',)},
+    {'id': 'mtw', 'dtype': 'f16', 'reduce': 'max', 'groups': ('turb_mtw',)},
+)
+POLICY_U8_MISSING = 255
+POLICY_U16_MISSING = 65535
+POLICY_GROUPS_BY_PROFILE = {
+    'bg': ('bg',),
+    'ts_flash': ('ts_flash',),
+    'airmass_fzl': ('airmass_fzl',),
+    'airmass_snow': ('airmass_snow',),
+    'turb_wind': ('turb_wind',),
+    'turb_mtw': ('turb_mtw',),
+}
+POLICY_CACHE = {
+    'gfs': {'lats': None, 'lons': None, 'hours': {}},
+    'icon': {'lats': None, 'lons': None, 'hours': {}},
+}
 
 # On-disk cache for downloaded ICON GRIB2 files.  Each entry is the raw
 # decompressed bytes keyed by run_stamp + folder + filename so that repeated
@@ -873,11 +1038,19 @@ def write_frame_manifest(base_dir=None):
             'axesFraction': georef.get('axesFraction'),
         }
 
+    policy_meta = {}
+    policy_dir = os.path.join(images_dir, 'policy')
+    for model_key in ('gfs', 'icon'):
+        json_name = f'{model_key}.json'
+        if os.path.isfile(os.path.join(policy_dir, json_name)):
+            policy_meta[model_key] = f'images/policy/{json_name}'
+
     manifest = {
         'generatedAt': datetime.now(timezone.utc).isoformat(),
         'domainOrder': normalize_domain_ids(),
         'legends': LEGEND_CONFIG,
         'domains': domains,
+        'policy': policy_meta,
     }
 
     manifest_path = os.path.join(images_dir, 'manifest.json')
@@ -1440,10 +1613,10 @@ def calculate_wet_bulb_freezing_level_height_ft(data):
 
 
 def calculate_snow_precipitation_1h(data):
-    """Calculate 1-hour precipitation where estimated snow level is less than 600m above terrain.
-    
+    """Calculate 1-hour precipitation where estimated snow level is less than 600 ft above terrain.
+
     Returns 1-hour total precipitation (mm) masked to grid points where
-    estimated snow level is lower than 600m above the terrain elevation.
+    estimated snow level is lower than 600 ft above the terrain elevation.
     """
     # Get estimated snow level in meters from calibrated regression.
     snow_level_m = calculate_estimated_snow_level_m(data)
@@ -1460,8 +1633,8 @@ def calculate_snow_precipitation_1h(data):
         print('Warning: 1-hour precipitation field not available; snow precipitation layer skipped.')
         return None
     
-    # Mask precipitation to only where snow level < 600m above terrain (snow will precipitate).
-    snow_precip = np.where((snow_level_m < (terrain_m + 600)) & np.isfinite(precip_1h), precip_1h, np.nan)
+    # Mask precipitation to only where snow level < 600 ft above terrain.
+    snow_precip = np.where((snow_level_m < (terrain_m + 182.88)) & np.isfinite(precip_1h), precip_1h, np.nan)
     
     return snow_precip
 
@@ -1694,6 +1867,357 @@ def calculate_mountain_wave_intensity(data, min_pressure_pa=25000):
 
     print(f'MTW intensity grid points >= 0.2 m/s: {np.sum(max_abs_wz >= 0.2)}')
     return max_abs_wz
+
+
+def reset_policy_cache():
+    for model_key in POLICY_CACHE:
+        POLICY_CACHE[model_key] = {'lats': None, 'lons': None, 'hours': {}}
+
+
+def _policy_model_key(model_name):
+    return 'gfs' if str(model_name).upper() == 'GFS' else 'icon'
+
+
+def _policy_values_2d(field):
+    if field is None:
+        return None
+    if hasattr(field, 'values'):
+        values = np.asarray(get_time_index(field).values)
+    else:
+        values = np.asarray(field)
+    values = np.squeeze(values)
+    if values.ndim != 2:
+        return None
+    return values.astype(float, copy=False)
+
+
+def _policy_grid_coords():
+    lons = np.arange(data_lon_min, data_lon_max + 0.0001, 0.25)
+    lats = np.arange(data_lat_min, data_lat_max + 0.0001, 0.25)
+    return lats, lons
+
+
+def calculate_fog_category(data):
+    temp_2m = get_time_index(data['Temperature_height_above_ground'].sel(height_above_ground3=2)).values - 273.15
+    dewpoint_2m = get_time_index(data['Dewpoint_temperature_height_above_ground'].sel(height_above_ground4=2)).values - 273.15
+    u_wind = get_time_index(data['u-component_of_wind_height_above_ground'].sel(height_above_ground2=10)).values
+    v_wind = get_time_index(data['v-component_of_wind_height_above_ground'].sel(height_above_ground2=10)).values
+    wind_speed_kt = np.sqrt(u_wind ** 2 + v_wind ** 2) * 1.94384
+    spread = temp_2m - dewpoint_2m
+    fog = np.zeros(spread.shape, dtype=np.uint8)
+    fog[(wind_speed_kt < 5) & (spread < 1.0)] = 1
+    fog[(wind_speed_kt < 3) & (spread < 0.5)] = 2
+    fog[(wind_speed_kt < 1) & (spread < 0.1)] = 3
+    return fog
+
+
+def calculate_precip_1h(data):
+    if 'Precipitation_rate_surface' not in data:
+        return None
+    precip = _policy_values_2d(data['Precipitation_rate_surface'])
+    if precip is None:
+        return None
+    return precip * 3600.0
+
+
+def calculate_low_cloud_rh(data):
+    rh_1000 = get_isobaric_field(data['Relative_humidity_isobaric'], 100000).values
+    rh_975 = get_isobaric_field(data['Relative_humidity_isobaric'], 97500).values
+    rh_950 = get_isobaric_field(data['Relative_humidity_isobaric'], 95000).values
+    return np.maximum(np.maximum(rh_1000, rh_975), rh_950)
+
+
+def calculate_drizzle_rh(data):
+    rh_950 = get_isobaric_field(data['Relative_humidity_isobaric'], 95000).values
+    rh_900 = get_isobaric_field(data['Relative_humidity_isobaric'], 90000).values
+    rh_850 = get_isobaric_field(data['Relative_humidity_isobaric'], 85000).values
+    return (rh_950 + rh_900 + rh_850) / 3.0
+
+
+def calculate_ts_precipitation_1h(data):
+    if 'Convective_precipitation_1h_surface' not in data:
+        return None
+    convective = _policy_values_2d(data['Convective_precipitation_1h_surface'])
+    if convective is None:
+        return None
+    min_li20 = calculate_min_lifted_index_minus20(data)
+    max_wz = get_max_geometric_vertical_velocity(data, [60000, 50000, 40000, 30000, 25000])
+    if 'Geometric_vertical_velocity_isobaric' in data and 'isobaric' in data['Geometric_vertical_velocity_isobaric'].dims:
+        ts_mask = (min_li20 < 0.0) & (max_wz > 0.1)
+    else:
+        ts_mask = min_li20 < 0.0
+    return np.where(ts_mask & (convective >= 0.1), convective, np.nan)
+
+
+def calculate_policy_icing_rh(data):
+    icing_rh = calculate_icing_relative_humidity(data)
+    freezing_level_ft = calculate_freezing_level_height_ft(data)
+    return np.where(
+        np.isfinite(icing_rh) & np.isfinite(freezing_level_ft) & (freezing_level_ft < 10000.0),
+        icing_rh,
+        np.nan,
+    )
+
+
+def calculate_small_hail_1h(data):
+    if 'Convective_precipitation_1h_surface' not in data:
+        return None
+    convective = _policy_values_2d(data['Convective_precipitation_1h_surface'])
+    if convective is None:
+        return None
+    t700_c = get_isobaric_field(data['Temperature_isobaric'], 70000).values - 273.15
+    return np.where((t700_c < -9.0) & (convective >= 0.1), convective, np.nan)
+
+
+def calculate_freezing_fog_category(data):
+    fog = calculate_fog_category(data)
+    temp_2m = get_time_index(data['Temperature_height_above_ground'].sel(height_above_ground3=2)).values - 273.15
+    return np.where(temp_2m < 0.0, fog, 0).astype(np.uint8)
+
+
+def calculate_shear_lee_category(data):
+    shear = calculate_shear_turbulence_category(data)
+    lee = calculate_lee_turbulence_category(data)
+    return np.maximum(shear, lee)
+
+
+def extract_policy_fields(data, groups):
+    wanted = set(groups)
+    extracted = {}
+
+    def _try(layer_id, fn):
+        try:
+            values = fn(data)
+        except Exception as exc:
+            print(f'Warning: Policy layer {layer_id} skipped ({exc})')
+            return
+        if values is None:
+            return
+        extracted[layer_id] = np.asarray(values)
+
+    if 'bg' in wanted:
+        _try('precip', calculate_precip_1h)
+        _try('low_cloud', calculate_low_cloud_rh)
+        _try('drizzle', calculate_drizzle_rh)
+        _try('fog', calculate_fog_category)
+    if 'ts_flash' in wanted:
+        _try('ts_precip', calculate_ts_precipitation_1h)
+    if 'airmass_fzl' in wanted:
+        _try('icing', calculate_policy_icing_rh)
+        _try('thermals', calculate_thermal_mixed_layer_depth_ft)
+        _try('small_hail', calculate_small_hail_1h)
+        _try('freezing_fog', calculate_freezing_fog_category)
+    if 'airmass_snow' in wanted:
+        _try('snow', calculate_snow_precipitation_1h)
+    if 'turb_wind' in wanted:
+        _try('shear_lee', calculate_shear_lee_category)
+    if 'turb_mtw' in wanted:
+        _try('mtw', calculate_mountain_wave_intensity)
+    return extracted
+
+
+def record_policy_fields(model_key, data, forecast_hour, groups):
+    bucket = POLICY_CACHE[model_key]
+    lats = np.asarray(data.latitude.values, dtype=np.float32)
+    lons = np.asarray(data.longitude.values, dtype=np.float32)
+    if bucket['lats'] is None:
+        bucket['lats'] = lats
+        bucket['lons'] = lons
+    elif lats.shape != bucket['lats'].shape or lons.shape != bucket['lons'].shape:
+        print(f'Warning: Policy grid mismatch for {model_key} +{forecast_hour}; hour skipped')
+        return
+
+    extracted = extract_policy_fields(data, groups)
+    if not extracted:
+        return
+    hour_entry = bucket['hours'].setdefault(int(forecast_hour), {})
+    hour_entry.update(extracted)
+
+
+def record_policy_from_profile(data, model_name, forecast_hour, layer_profile):
+    groups = POLICY_GROUPS_BY_PROFILE.get(layer_profile)
+    if not groups:
+        return
+    record_policy_fields(_policy_model_key(model_name), data, forecast_hour, groups)
+
+
+def _encode_policy_layer(values, dtype):
+    if dtype == 'f16':
+        encoded = np.asarray(values, dtype=np.float32)
+        encoded = np.where(np.isfinite(encoded), encoded, np.nan).astype('<f2')
+        return encoded.tobytes()
+    if dtype == 'u8':
+        encoded = np.full(values.shape, POLICY_U8_MISSING, dtype=np.uint8)
+        finite = np.isfinite(values)
+        rounded = np.rint(np.clip(np.where(finite, values, 0.0), 0, 254))
+        encoded[finite] = rounded[finite].astype(np.uint8)
+        return encoded.tobytes()
+    if dtype == 'u16':
+        encoded = np.full(values.shape, POLICY_U16_MISSING, dtype=np.uint16)
+        finite = np.isfinite(values)
+        rounded = np.rint(np.clip(np.where(finite, values, 0.0), 0, 65534))
+        encoded[finite] = rounded[finite].astype(np.uint16)
+        return np.asarray(encoded, dtype='<u2').tobytes()
+    raise ValueError(f'Unsupported policy dtype {dtype}')
+
+
+def _decode_policy_layer(payload, dtype, shape):
+    nlat, nlon = shape
+    if dtype == 'f16':
+        values = np.frombuffer(payload, dtype='<f2').reshape(nlat, nlon).astype(np.float32)
+        return values
+    if dtype == 'u8':
+        raw = np.frombuffer(payload, dtype=np.uint8).reshape(nlat, nlon)
+        values = raw.astype(np.float32)
+        values[raw == POLICY_U8_MISSING] = np.nan
+        return values
+    if dtype == 'u16':
+        raw = np.frombuffer(payload, dtype='<u2').reshape(nlat, nlon)
+        values = raw.astype(np.float32)
+        values[raw == POLICY_U16_MISSING] = np.nan
+        return values
+    raise ValueError(f'Unsupported policy dtype {dtype}')
+
+
+def write_policy_stacks(dest_dir):
+    os.makedirs(dest_dir, exist_ok=True)
+    written = []
+    for model_key, bucket in POLICY_CACHE.items():
+        hours = sorted(bucket['hours'])
+        if not hours or bucket['lats'] is None:
+            continue
+        nlat = int(bucket['lats'].size)
+        nlon = int(bucket['lons'].size)
+        missing = np.full((nlat, nlon), np.nan, dtype=np.float32)
+        blobs = []
+        layers_meta = []
+        offset = 0
+        for spec in POLICY_LAYER_SPECS:
+            hour_payloads = []
+            for hour in hours:
+                values = bucket['hours'][hour].get(spec['id'])
+                if values is None:
+                    values = missing
+                else:
+                    values = np.asarray(values, dtype=np.float32)
+                    if values.shape != (nlat, nlon):
+                        print(
+                            f'Warning: Policy {model_key} {spec["id"]} +{hour} shape '
+                            f'{values.shape} != {(nlat, nlon)}; hour filled as missing'
+                        )
+                        values = missing
+                hour_payloads.append(_encode_policy_layer(values, spec['dtype']))
+            payload = b''.join(hour_payloads)
+            layers_meta.append({
+                'id': spec['id'],
+                'dtype': spec['dtype'],
+                'reduce': spec['reduce'],
+                'offset': offset,
+                'length': len(payload),
+            })
+            blobs.append(payload)
+            offset += len(payload)
+
+        lats = np.asarray(bucket['lats'], dtype=np.float64)
+        lons = np.asarray(bucket['lons'], dtype=np.float64)
+        meta = {
+            'version': 1,
+            'model': model_key,
+            'bin': f'{model_key}.bin',
+            'nlat': nlat,
+            'nlon': nlon,
+            'lat0': float(lats[0]),
+            'dlat': float(lats[1] - lats[0]) if nlat > 1 else 0.25,
+            'lon0': float(lons[0]),
+            'dlon': float(lons[1] - lons[0]) if nlon > 1 else 0.25,
+            'hours': hours,
+            'layers': layers_meta,
+        }
+        json_path = os.path.join(dest_dir, f'{model_key}.json')
+        bin_path = os.path.join(dest_dir, f'{model_key}.bin')
+        with open(json_path, 'w', encoding='utf-8') as json_file:
+            json.dump(meta, json_file, indent=2)
+            json_file.write('\n')
+        with open(bin_path, 'wb') as bin_file:
+            bin_file.write(b''.join(blobs))
+        written.append(json_path)
+        print(f'Wrote policy stack {model_key}: {len(hours)} hours, {nlat}x{nlon}')
+    return written
+
+
+def load_policy_stacks_from_disk(source_dir):
+    for model_key in ('gfs', 'icon'):
+        json_path = os.path.join(source_dir, f'{model_key}.json')
+        bin_path = os.path.join(source_dir, f'{model_key}.bin')
+        if not os.path.isfile(json_path) or not os.path.isfile(bin_path):
+            continue
+        with open(json_path, 'r', encoding='utf-8') as json_file:
+            meta = json.load(json_file)
+        with open(bin_path, 'rb') as bin_file:
+            payload = bin_file.read()
+        nlat = int(meta['nlat'])
+        nlon = int(meta['nlon'])
+        hours = [int(hour) for hour in meta.get('hours', [])]
+        lats = meta['lat0'] + np.arange(nlat, dtype=np.float32) * np.float32(meta['dlat'])
+        lons = meta['lon0'] + np.arange(nlon, dtype=np.float32) * np.float32(meta['dlon'])
+        bucket = POLICY_CACHE[model_key]
+        if bucket['lats'] is None:
+            bucket['lats'] = lats
+            bucket['lons'] = lons
+        for layer in meta.get('layers', []):
+            raw = payload[layer['offset']:layer['offset'] + layer['length']]
+            hour_size = len(raw) // max(len(hours), 1)
+            for index, hour in enumerate(hours):
+                chunk = raw[index * hour_size:(index + 1) * hour_size]
+                values = _decode_policy_layer(chunk, layer['dtype'], (nlat, nlon))
+                hour_entry = bucket['hours'].setdefault(hour, {})
+                if layer['id'] not in hour_entry:
+                    hour_entry[layer['id']] = values
+
+
+def flush_policy_stacks(base_dir=None, merge_existing=False):
+    if base_dir is None:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+    dest_dir = os.path.join(base_dir, 'images', 'policy')
+    if merge_existing:
+        load_policy_stacks_from_disk(dest_dir)
+    return write_policy_stacks(dest_dir)
+
+
+def save_policy_base_maps(data, init_time, forecast_hour, model_name, domain_ids, temp_dirs, generated_files_by_domain):
+    filename = f'{model_name}_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.{OUTPUT_IMAGE_EXT}'
+    for domain_id in domain_ids:
+        fig = plot_map(
+            data,
+            init_time,
+            forecast_hour,
+            model_name=model_name,
+            layer_profile='policy_base',
+            domain_id=domain_id,
+        )
+        temp_filepath = os.path.join(temp_dirs[domain_id], filename)
+        save_output_figure(fig, temp_filepath)
+        plt.close(fig)
+        generated_files_by_domain[domain_id].append(filename)
+
+
+def prepare_policy_base_outputs(domain_ids, model_name, staging_root, output_root=None, output_dir=None):
+    panel_name = 'GFS' if model_name == 'GFS' else 'ICON'
+    output_dirs = resolve_panel_output_dirs(
+        domain_ids,
+        'Policy',
+        panel_name,
+        output_dir=output_dir,
+        output_root=output_root,
+    )
+    temp_dirs = {}
+    generated = {domain_id: [] for domain_id in domain_ids}
+    for domain_id in domain_ids:
+        os.makedirs(output_dirs[domain_id], exist_ok=True)
+        temp_dir = os.path.join(staging_root, 'policy_base', domain_id)
+        os.makedirs(temp_dir, exist_ok=True)
+        temp_dirs[domain_id] = temp_dir
+    return output_dirs, temp_dirs, generated
 
 
 def get_gfs_convective_precip_accumulation(forecast_hour, init_time):
@@ -2628,10 +3152,11 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
     ts_flash_profile = layer_profile == 'ts_flash'
     ts_severe_profile = layer_profile == 'ts_severe'
     bg_profile = layer_profile == 'bg'
+    policy_base_profile = layer_profile == 'policy_base'
     turb_mtw_profile = layer_profile == 'turb_mtw'
     turb_wind_profile = layer_profile == 'turb_wind'
     turb_profile = turb_mtw_profile or turb_wind_profile
-    bg_or_turb_profile = bg_profile or turb_profile
+    bg_or_turb_profile = bg_profile or turb_profile or policy_base_profile
     airmass_fzl_profile = layer_profile == 'airmass_fzl'
     airmass_snow_profile = layer_profile == 'airmass_snow'
     airmass_profile = airmass_fzl_profile or airmass_snow_profile
@@ -2883,7 +3408,14 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
 
     # Plot MSLP except for Airmass profiles.
     if not airmass_profile:
-        mslp_alpha = 0.2 if turb_profile else (0.5 if bg_profile else 0.3)
+        if policy_base_profile:
+            mslp_alpha = 0.3
+        elif turb_profile:
+            mslp_alpha = 0.2
+        elif bg_profile:
+            mslp_alpha = 0.5
+        else:
+            mslp_alpha = 0.3
         mslp = get_time_index(data['MSLP_Eta_model_reduction_msl']) / 100  # Convert to hPa
         cs_mslp = ax.contour(
             data.longitude,
@@ -3514,7 +4046,9 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         max_wz = get_max_geometric_vertical_velocity(data, [60000, 50000, 40000, 30000, 25000])
         convective_precip = data['Convective_precipitation_1h_surface']
         min_li20 = calculate_min_lifted_index_minus20(data)
-        # ICON flash has no isobaric wz; keep LI-20 gate and treat missing wz as open.
+        # ICON flash maps model-level W@92 onto the 500 hPa isobaric slot, so this
+        # gate uses |VV| on whichever requested levels are populated (GFS 600–250,
+        # ICON ~500 hPa only).
         if 'Geometric_vertical_velocity_isobaric' in data and 'isobaric' in data['Geometric_vertical_velocity_isobaric'].dims:
             ts_mask = (min_li20 < 0.0) & (max_wz > 0.1)
         else:
@@ -3563,7 +4097,7 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         precip_colors = None
         precip_alpha = None
         precip_zorder = None
-    elif turb_profile:
+    elif turb_profile or policy_base_profile:
         precip_masked = None
         precip_levels = None
         precip_colors = None
@@ -3642,10 +4176,11 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
         )
     
     # Plot SFC winds unless explicitly disabled for the current profile.
-    if not ts_severe_profile and not airmass_profile:
+    if not ts_severe_profile and not airmass_profile and not policy_base_profile:
         barb_alpha = 0.2 if turb_profile else (0.5 if bg_or_turb_profile else 0.3)
         ax.barbs(data.longitude[::10], data.latitude[::10], u_wind.values[::10, ::10], v_wind.values[::10, ::10], 
-                 length=5, linewidth=0.5, color='#800000', alpha=barb_alpha, zorder=(z_bg_barbs if bg_or_turb_profile else 6))
+                 length=5, linewidth=0.5, color='#800000', alpha=barb_alpha, zorder=(z_bg_barbs if bg_or_turb_profile else 6),
+                 flip_barb=True, transform=ccrs.PlateCarree())
     else:
         if ts_severe_profile:
             # Plot surface-to-500 hPa shear vectors as barbs in kt.
@@ -3662,6 +4197,8 @@ def plot_map(data, init_time, forecast_hour, model_name='GFS', layer_profile='bg
                 color='#2b0000',
                 alpha=0.5,
                 zorder=6.2,
+                flip_barb=True,
+                transform=ccrs.PlateCarree(),
             )
     
     # Plot TAF locations with filtering based on text bounding boxes
@@ -3754,6 +4291,9 @@ def generate_gfs_bg_frames(
             temp_dirs[domain_id] = temp_dir
 
         print(f'Generating {len(forecast_hours)} Fog & Low Cloud forecast frames for domains {", ".join(domain_ids)} in temporary workspace: {staging_root}')
+        policy_output_dirs, policy_temp_dirs, policy_generated = prepare_policy_base_outputs(
+            domain_ids, 'GFS', staging_root, output_root=output_root
+        )
 
         for forecast_hour in forecast_hours:
             print(f'\nGenerating frame +{forecast_hour}hrs...')
@@ -3761,6 +4301,7 @@ def generate_gfs_bg_frames(
             # Get raw hourly data from NOMADS GFS 0.25 files.
             data, init_time, _ = get_gfs_data(forecast_hour, latest_dataset, init_time)
             print('Using raw hourly GFS 0.25 model fields')
+            record_policy_from_profile(data, 'GFS', forecast_hour, 'bg')
 
             # Plot map
             filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.{OUTPUT_IMAGE_EXT}'
@@ -3771,10 +4312,14 @@ def generate_gfs_bg_frames(
                 plt.close(fig)
                 generated_files_by_domain[domain_id].append(filename)
                 print(f'Fog & Low Cloud map staged for {domain_id} at {temp_filepath}')
+            save_policy_base_maps(
+                data, init_time, forecast_hour, 'GFS', domain_ids, policy_temp_dirs, policy_generated
+            )
 
         for domain_id in domain_ids:
             print(f'\nFinished building {len(generated_files_by_domain[domain_id])} Fog & Low Cloud frames for {domain_id}. Publishing to {output_dirs[domain_id]}...')
             publish_generated_frames(output_dirs[domain_id], generated_files_by_domain[domain_id], temp_dirs[domain_id])
+            publish_generated_frames(policy_output_dirs[domain_id], policy_generated[domain_id], policy_temp_dirs[domain_id])
         if update_manifest:
             write_frame_manifest()
 
@@ -3819,6 +4364,7 @@ def generate_gfs_ts_flash_frames(
             )
             last_generated_hour = forecast_hour
             print('Using raw hourly GFS convective precipitation and geometric vertical velocity fields')
+            record_policy_from_profile(data, 'GFS', forecast_hour, 'ts_flash')
 
             filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.{OUTPUT_IMAGE_EXT}'
             for domain_id in domain_ids:
@@ -3934,6 +4480,7 @@ def generate_gfs_airmass_fzl_frames(
             )
             last_generated_hour = forecast_hour
             print('Using raw hourly GFS convective precipitation and airmass fields')
+            record_policy_from_profile(data, 'GFS', forecast_hour, 'airmass_fzl')
 
             filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.{OUTPUT_IMAGE_EXT}'
             for domain_id in domain_ids:
@@ -3986,6 +4533,7 @@ def generate_gfs_airmass_snow_frames(
                 include_airmass_fields=True,
             )
             print('Using raw hourly GFS precipitation and airmass fields')
+            record_policy_from_profile(data, 'GFS', forecast_hour, 'airmass_snow')
 
             filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.{OUTPUT_IMAGE_EXT}'
             for domain_id in domain_ids:
@@ -4074,6 +4622,10 @@ def _generate_gfs_turb_frames_internal(
                 include_ts_fields=include_mtw,
             )
             print('Using raw hourly GFS 0.25 model fields for Turbulence maps')
+            if include_mtw:
+                record_policy_from_profile(data, 'GFS', forecast_hour, 'turb_mtw')
+            if include_wind:
+                record_policy_from_profile(data, 'GFS', forecast_hour, 'turb_wind')
 
             if include_mtw:
                 mtw_filename = f'GFS_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.{OUTPUT_IMAGE_EXT}'
@@ -4210,6 +4762,9 @@ def generate_icon_bg_frames(
 
         accum_state = {'tot_prec': None, 'rain_con': None}
         last_generated_hour = None
+        policy_output_dirs, policy_temp_dirs, policy_generated = prepare_policy_base_outputs(
+            domain_ids, 'ICON', staging_root, output_root=output_root
+        )
         for forecast_hour in forecast_hours:
             print(f'\nGenerating ICON frame +{forecast_hour}hrs...')
 
@@ -4228,6 +4783,7 @@ def generate_icon_bg_frames(
             )
             last_generated_hour = forecast_hour
             print('Using raw hourly ICON model fields')
+            record_policy_from_profile(data, 'ICON', forecast_hour, 'bg')
 
             filename = f'ICON_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.{OUTPUT_IMAGE_EXT}'
             for domain_id in domain_ids:
@@ -4237,10 +4793,14 @@ def generate_icon_bg_frames(
                 plt.close(fig)
                 generated_files_by_domain[domain_id].append(filename)
                 print(f'ICON map staged for {domain_id} at {temp_filepath}')
+            save_policy_base_maps(
+                data, init_time, forecast_hour, 'ICON', domain_ids, policy_temp_dirs, policy_generated
+            )
 
         for domain_id in domain_ids:
             print(f'\nFinished building {len(generated_files_by_domain[domain_id])} ICON frames for {domain_id}. Publishing to {output_dirs[domain_id]}...')
             publish_generated_frames(output_dirs[domain_id], generated_files_by_domain[domain_id], temp_dirs[domain_id])
+            publish_generated_frames(policy_output_dirs[domain_id], policy_generated[domain_id], policy_temp_dirs[domain_id])
         if update_manifest:
             write_frame_manifest()
 
@@ -4303,6 +4863,7 @@ def _generate_icon_product_frames(
             )
             last_generated_hour = forecast_hour
             print(f'Using raw hourly ICON fields ({field_set})')
+            record_policy_from_profile(data, 'ICON', forecast_hour, layer_profile)
 
             filename = f'ICON_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.{OUTPUT_IMAGE_EXT}'
             for domain_id in domain_ids:
@@ -4399,6 +4960,8 @@ def _generate_icon_multi_panel_frames(
                 field_set=field_set,
             )
             last_generated_hour = forecast_hour
+            for panel in panels:
+                record_policy_from_profile(data, 'ICON', forecast_hour, panel['layer_profile'])
             filename = f'ICON_{init_time.strftime("%Y%m%d_%H")}_{forecast_hour:02d}.{OUTPUT_IMAGE_EXT}'
             for panel in panels:
                 for domain_id in domain_ids:
@@ -4533,6 +5096,7 @@ def generate_all_layers_atomically(forecast_hours, model='both', domain_ids=None
     script_dir = os.path.dirname(os.path.abspath(__file__))
     staged_targets = []
     domain_ids = normalize_domain_ids(domain_ids)
+    reset_policy_cache()
 
     gfs_latest_dataset = None
     gfs_init_time = None
@@ -4620,6 +5184,7 @@ def generate_all_layers_atomically(forecast_hours, model='both', domain_ids=None
 
             generate_icon_bg_frames(forecast_hours, **icon_kwargs)
             staged_targets.extend([os.path.join('images', 'domains', domain_id, 'BG', 'ICON') for domain_id in domain_ids])
+            staged_targets.extend([os.path.join('images', 'domains', domain_id, 'Policy', 'ICON') for domain_id in domain_ids])
 
             generate_icon_airmass_frames(forecast_hours, **icon_kwargs)
             for domain_id in domain_ids:
@@ -4652,17 +5217,131 @@ def generate_all_layers_atomically(forecast_hours, model='both', domain_ids=None
                 output_root=stage_output_root,
             )
             staged_targets.extend([os.path.join('images', 'domains', domain_id, 'BG', 'US') for domain_id in domain_ids])
+            staged_targets.extend([os.path.join('images', 'domains', domain_id, 'Policy', 'GFS') for domain_id in domain_ids])
 
+        policy_stage_dir = os.path.join(staging_root, 'images', 'policy')
+        write_policy_stacks(policy_stage_dir)
         publish_staged_directories_atomically(staging_root, staged_targets)
+        live_policy_dir = os.path.join(script_dir, 'images', 'policy')
+        os.makedirs(live_policy_dir, exist_ok=True)
+        if os.path.isdir(policy_stage_dir):
+            for entry in os.listdir(policy_stage_dir):
+                shutil.copy2(os.path.join(policy_stage_dir, entry), os.path.join(live_policy_dir, entry))
         write_frame_manifest(script_dir)
         print(f'Atomic publish complete. Updated {len(staged_targets)} directories under {script_dir}/images')
+
+
+def _build_policy_fixture_dataset(forecast_hour):
+    lats, lons = _policy_grid_coords()
+    nlat, nlon = len(lats), len(lons)
+    lon_grid, lat_grid = np.meshgrid(lons, lats)
+    mslp = 101325.0 - (lat_grid + 35.0) * 80.0 - (lon_grid - 135.0) * 40.0
+    orog = np.maximum(0.0, 900.0 - ((lat_grid + 32.0) ** 2 + ((lon_grid - 145.0) / 2.0) ** 2) * 35.0)
+    u10 = np.full((nlat, nlon), 2.0)
+    v10 = np.full((nlat, nlon), -1.0)
+    t2m = np.full((nlat, nlon), 288.15)
+    td2m = t2m - 2.0
+    return xr.Dataset(
+        {
+            'MSLP_Eta_model_reduction_msl': (('latitude', 'longitude'), mslp),
+            'Geopotential_height_surface': (('latitude', 'longitude'), orog),
+            'u-component_of_wind_height_above_ground': (
+                ('height_above_ground2', 'latitude', 'longitude'),
+                u10[np.newaxis, :, :],
+            ),
+            'v-component_of_wind_height_above_ground': (
+                ('height_above_ground2', 'latitude', 'longitude'),
+                v10[np.newaxis, :, :],
+            ),
+            'Temperature_height_above_ground': (
+                ('height_above_ground3', 'latitude', 'longitude'),
+                t2m[np.newaxis, :, :],
+            ),
+            'Dewpoint_temperature_height_above_ground': (
+                ('height_above_ground4', 'latitude', 'longitude'),
+                td2m[np.newaxis, :, :],
+            ),
+        },
+        coords={
+            'latitude': lats,
+            'longitude': lons,
+            'height_above_ground2': [10],
+            'height_above_ground3': [2],
+            'height_above_ground4': [2],
+        },
+    )
+
+
+def _policy_fixture_blob(nlat, nlon, lats, lons, hour, lat_c, lon_c, radius, value):
+    lon_grid, lat_grid = np.meshgrid(lons, lats)
+    shift = (hour - 6) * 0.35
+    dist = np.sqrt((lat_grid - lat_c) ** 2 + (lon_grid - (lon_c + shift)) ** 2)
+    field = np.full((nlat, nlon), np.nan, dtype=np.float32)
+    field[dist <= radius] = value
+    return field
+
+
+def generate_policy_fixture(forecast_hours=None, domain_ids=None):
+    """Write synthetic Policy bases and overlay stacks for local UI checks (no GRIB fetch)."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    hours = list(forecast_hours or [6, 12, 18, 24])
+    domain_ids = normalize_domain_ids(domain_ids)
+    reset_policy_cache()
+    lats, lons = _policy_grid_coords()
+    nlat, nlon = len(lats), len(lons)
+    init_time = datetime(2026, 10, 29, 0, tzinfo=timezone.utc)
+
+    for model_key in ('gfs', 'icon'):
+        POLICY_CACHE[model_key]['lats'] = np.asarray(lats, dtype=np.float32)
+        POLICY_CACHE[model_key]['lons'] = np.asarray(lons, dtype=np.float32)
+        lat_offset = 0.0 if model_key == 'gfs' else 1.2
+        for hour in hours:
+            hour_entry = {}
+            hour_entry['precip'] = _policy_fixture_blob(nlat, nlon, lats, lons, hour, -34.0 + lat_offset, 138.0, 3.5, 2.0 + hour * 0.15)
+            hour_entry['low_cloud'] = _policy_fixture_blob(nlat, nlon, lats, lons, hour, -37.0 + lat_offset, 144.0, 4.0, 96.0)
+            hour_entry['drizzle'] = _policy_fixture_blob(nlat, nlon, lats, lons, hour, -33.5 + lat_offset, 151.0, 2.2, 97.0)
+            fog = np.zeros((nlat, nlon), dtype=np.float32)
+            fog_blob = _policy_fixture_blob(nlat, nlon, lats, lons, hour, -38.0 + lat_offset, 145.0, 2.0, 2.0)
+            fog[np.isfinite(fog_blob)] = 2
+            hour_entry['fog'] = fog
+            hour_entry['ts_precip'] = _policy_fixture_blob(nlat, nlon, lats, lons, hour, -32.0 + lat_offset, 148.0, 2.8, 4.0)
+            icing = _policy_fixture_blob(nlat, nlon, lats, lons, hour, -36.5 + lat_offset, 147.0, 2.5, 98.0)
+            hour_entry['icing'] = icing
+            hour_entry['thermals'] = _policy_fixture_blob(nlat, nlon, lats, lons, hour, -31.0 + lat_offset, 136.0, 3.0, 9000.0)
+            hour_entry['small_hail'] = _policy_fixture_blob(nlat, nlon, lats, lons, hour, -35.0 + lat_offset, 149.0, 1.8, 1.5)
+            freeze = np.zeros((nlat, nlon), dtype=np.float32)
+            freeze_blob = _policy_fixture_blob(nlat, nlon, lats, lons, hour, -42.0 + lat_offset, 147.0, 1.6, 1.0)
+            freeze[np.isfinite(freeze_blob)] = 1
+            hour_entry['freezing_fog'] = freeze
+            hour_entry['snow'] = _policy_fixture_blob(nlat, nlon, lats, lons, hour, -36.8 + lat_offset, 148.2, 1.4, 1.2)
+            shear = np.zeros((nlat, nlon), dtype=np.float32)
+            shear_blob = _policy_fixture_blob(nlat, nlon, lats, lons, hour, -35.5 + lat_offset, 141.0, 2.4, 2.0)
+            shear[np.isfinite(shear_blob)] = 2
+            hour_entry['shear_lee'] = shear
+            hour_entry['mtw'] = _policy_fixture_blob(nlat, nlon, lats, lons, hour, -36.2 + lat_offset, 148.5, 1.5, 0.5)
+            POLICY_CACHE[model_key]['hours'][hour] = hour_entry
+
+    with tempfile.TemporaryDirectory(prefix='avmaps_policy_fixture_') as staging_root:
+        for model_name in ('GFS', 'ICON'):
+            output_dirs, temp_dirs, generated = prepare_policy_base_outputs(
+                domain_ids, model_name, os.path.join(staging_root, model_name)
+            )
+            for hour in hours:
+                data = _build_policy_fixture_dataset(hour)
+                save_policy_base_maps(data, init_time, hour, model_name, domain_ids, temp_dirs, generated)
+            for domain_id in domain_ids:
+                publish_generated_frames(output_dirs[domain_id], generated[domain_id], temp_dirs[domain_id])
+
+    write_policy_stacks(os.path.join(script_dir, 'images', 'policy'))
+    write_frame_manifest(script_dir)
+    print('Policy fixture published (synthetic bases + overlay stacks).')
 
 
 # Main function
 def main():
     parser = argparse.ArgumentParser(description='Generate aviation forecast frames from GFS and/or ICON data.')
     parser.add_argument('--model', choices=['gfs', 'icon', 'both'], default='both')
-    parser.add_argument('--layer', choices=['bg', 'ts_flash', 'ts_severe', 'airmass_fzl', 'airmass_snow', 'turb', 'turb_mtw', 'turb_wind', 'all'], default='bg')
+    parser.add_argument('--layer', choices=['bg', 'ts_flash', 'ts_severe', 'airmass_fzl', 'airmass_snow', 'turb', 'turb_mtw', 'turb_wind', 'all', 'policy_fixture'], default='bg')
     parser.add_argument('--start-hour', type=int, default=6)
     parser.add_argument('--end-hour', type=int, default=48)
     parser.add_argument('--domains', default='all', help='Comma-separated domain ids, or all. Current ids: AU,WA_SA,VIC_TAS,NSW')
@@ -4671,9 +5350,17 @@ def main():
     forecast_hours = list(range(args.start_hour, args.end_hour + 1))
     domain_ids = normalize_domain_ids(args.domains)
 
+    if args.layer == 'policy_fixture':
+        generate_policy_fixture(domain_ids=domain_ids)
+        return
+
     if args.layer == 'all':
         generate_all_layers_atomically(forecast_hours, model=args.model, domain_ids=domain_ids)
         return
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    reset_policy_cache()
+    load_policy_stacks_from_disk(os.path.join(script_dir, 'images', 'policy'))
 
     gfs_run_time = None
     if args.model in ('gfs', 'both'):
@@ -4689,56 +5376,45 @@ def main():
             generate_gfs_ts_flash_frames(forecast_hours, domain_ids=domain_ids)
         if args.model in ('icon', 'both'):
             generate_icon_ts_flash_frames(forecast_hours, domain_ids=domain_ids, **icon_kwargs)
-        return
-
-    if args.layer == 'ts_severe':
+    elif args.layer == 'ts_severe':
         if args.model in ('gfs', 'both'):
             generate_gfs_ts_severe_frames(forecast_hours, domain_ids=domain_ids)
         if args.model in ('icon', 'both'):
             generate_icon_ts_severe_frames(forecast_hours, domain_ids=domain_ids, **icon_kwargs)
-        return
-
-    if args.layer == 'airmass_fzl':
+    elif args.layer == 'airmass_fzl':
         if args.model in ('gfs', 'both'):
             generate_gfs_airmass_fzl_frames(forecast_hours, domain_ids=domain_ids)
         if args.model in ('icon', 'both'):
             generate_icon_airmass_fzl_frames(forecast_hours, domain_ids=domain_ids, **icon_kwargs)
-        return
-
-    if args.layer == 'airmass_snow':
+    elif args.layer == 'airmass_snow':
         if args.model in ('gfs', 'both'):
             generate_gfs_airmass_snow_frames(forecast_hours, domain_ids=domain_ids)
         if args.model in ('icon', 'both'):
             generate_icon_airmass_snow_frames(forecast_hours, domain_ids=domain_ids, **icon_kwargs)
-        return
-
-    if args.layer == 'turb':
+    elif args.layer == 'turb':
         if args.model in ('gfs', 'both'):
             generate_gfs_turb_frames(forecast_hours, domain_ids=domain_ids)
         if args.model in ('icon', 'both'):
             generate_icon_turb_wind_frames(forecast_hours, domain_ids=domain_ids, **icon_kwargs)
             generate_icon_turb_mtw_frames(forecast_hours, domain_ids=domain_ids, **icon_kwargs)
-        return
-
-    if args.layer == 'turb_mtw':
+    elif args.layer == 'turb_mtw':
         if args.model in ('gfs', 'both'):
             generate_gfs_turb_mtw_frames(forecast_hours, domain_ids=domain_ids)
         if args.model in ('icon', 'both'):
             generate_icon_turb_mtw_frames(forecast_hours, domain_ids=domain_ids, **icon_kwargs)
-        return
-
-    if args.layer == 'turb_wind':
+    elif args.layer == 'turb_wind':
         if args.model in ('gfs', 'both'):
             generate_gfs_turb_wind_frames(forecast_hours, domain_ids=domain_ids)
         if args.model in ('icon', 'both'):
             generate_icon_turb_wind_frames(forecast_hours, domain_ids=domain_ids, **icon_kwargs)
-        return
+    else:
+        if args.model in ('gfs', 'both'):
+            generate_gfs_bg_frames(forecast_hours, domain_ids=domain_ids)
+        if args.model in ('icon', 'both'):
+            generate_icon_bg_frames(forecast_hours, domain_ids=domain_ids, **icon_kwargs)
 
-    if args.model in ('gfs', 'both'):
-        generate_gfs_bg_frames(forecast_hours, domain_ids=domain_ids)
-
-    if args.model in ('icon', 'both'):
-        generate_icon_bg_frames(forecast_hours, domain_ids=domain_ids, **icon_kwargs)
+    flush_policy_stacks()
+    write_frame_manifest(script_dir)
 
 if __name__ == '__main__':
     main()

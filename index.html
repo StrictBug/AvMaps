@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Aviation map viewer</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="styles.css?v=hodo-indices-size-1">
+    <link rel="stylesheet" href="styles.css?v=policy-layers-no-title-1">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.css">
 </head>
 <body class="loading">
     <header>
@@ -17,7 +18,7 @@
                         <path d="M12 1.8c-3.7 0-6.7 3.1-6.7 7 0 3.2 2.1 5.9 5.1 6.7L9.2 21.2h5.6l-1.2-5.7c3-.8 5.1-3.5 5.1-6.7 0-3.9-3-7-6.7-7zm0 2.2c2.5 0 4.5 2.1 4.5 4.8S14.5 13.6 12 13.6 7.5 11.5 7.5 8.8 9.5 4 12 4z"/>
                     </svg>
                 </button>
-                <button id="profile-table-tool-btn" class="tool-btn" type="button" aria-pressed="false" aria-label="Profile table (P)" title="Profile table (P)">
+                <button id="profile-table-tool-btn" class="tool-btn" type="button" aria-pressed="false" aria-label="Profile table (Shift+T)" title="Profile table (Shift+T)">
                     <svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                         <rect x="4.2" y="5" width="15.6" height="14" rx="1.4"/>
                         <path d="M4.2 10h15.6M4.2 15h15.6M10 5v14"/>
@@ -30,7 +31,7 @@
                         <path d="M12 12l5.2-3.4"/>
                     </svg>
                 </button>
-                <button id="info-btn" class="info-btn" type="button" aria-label="Show keyboard controls" title="Keyboard controls">i</button>
+                <button id="info-btn" class="info-btn" type="button" aria-label="Show information" title="Information">i</button>
             </div>
         </div>
         <div class="category-section">
@@ -39,6 +40,7 @@
                 <button class="category-btn" data-category="TS">Thunderstorms</button>
                 <button class="category-btn" data-category="Airmass">Airmass</button>
                 <button class="category-btn" data-category="Turb">Turbulence</button>
+                <button class="category-btn" data-category="Policy">Policy</button>
             </div>
             <div class="mobile-selectors">
                 <select id="mobile-domain-select" class="mobile-select" aria-label="Select domain">
@@ -52,6 +54,7 @@
                     <option value="TS">Thunderstorms</option>
                     <option value="Airmass">Airmass</option>
                     <option value="Turb">Turbulence</option>
+                    <option value="Policy">Policy</option>
                 </select>
             </div>
         </div>
@@ -81,9 +84,11 @@
                     </button>
                     <div class="image-panel left-panel top-left-panel" data-panel="topLeft" data-row="0" data-col="0">
                         <img id="left-image" class="map-image" data-panel="topLeft" src="" alt="Top-left map">
+                        <canvas class="policy-overlay" data-panel="topLeft" aria-hidden="true"></canvas>
                     </div>
                     <div class="image-panel right-panel top-right-panel quad-only" data-panel="topRight" data-row="0" data-col="1">
                         <img id="right-image" class="map-image" data-panel="topRight" src="" alt="Top-right map">
+                        <canvas class="policy-overlay" data-panel="topRight" aria-hidden="true"></canvas>
                     </div>
 
                     <button type="button" class="map-row-header" data-row="1" id="map-row-header-1" aria-pressed="false" title="Maximize row">
@@ -91,13 +96,18 @@
                     </button>
                     <div class="image-panel bottom-left-panel" data-panel="bottomLeft" data-row="1" data-col="0">
                         <img id="bottom-left-image" class="map-image" data-panel="bottomLeft" src="" alt="Bottom-left map">
+                        <canvas class="policy-overlay" data-panel="bottomLeft" aria-hidden="true"></canvas>
                     </div>
                     <div class="image-panel bottom-right-panel quad-only" data-panel="bottomRight" data-row="1" data-col="1">
                         <img id="bottom-right-image" class="map-image" data-panel="bottomRight" src="" alt="Bottom-right map">
+                        <canvas class="policy-overlay" data-panel="bottomRight" aria-hidden="true"></canvas>
                     </div>
                     <div id="map-swap-loading" class="map-swap-loading hidden" aria-hidden="true" aria-live="polite">
                         <div class="map-swap-loading-spinner" role="status" aria-label="Loading maps"></div>
                     </div>
+                    <aside id="policy-layers-panel" class="policy-layers-panel" aria-label="Policy layers">
+                        <div id="policy-layers-list" class="policy-layers-list"></div>
+                    </aside>
                 </div>
                 <div
                     id="sounding-resize-handle"
@@ -247,41 +257,59 @@
     <div class="info-overlay hidden" id="info-overlay" aria-hidden="true">
         <div class="info-card" role="dialog" aria-modal="true" aria-labelledby="info-title">
             <button id="info-close-btn" class="info-close-btn" type="button" aria-label="Close information">×</button>
-            <h2 id="info-title" class="info-title">Keyboard Controls</h2>
-
-            <div class="info-section">
-                <h3>Switch Category</h3>
-                <p><span class="key-chip">F</span> Fog & Low Cloud</p>
-                <p><span class="key-chip">L</span> Thunderstorms</p>
-                <p><span class="key-chip">A</span> Airmass</p>
-                <p><span class="key-chip">T</span> Turbulence</p>
+            <h2 id="info-title" class="info-title">Information</h2>
+            <div class="info-tabs" role="tablist" aria-label="Information sections">
+                <button type="button" class="info-tab active" id="info-tab-controls" role="tab" aria-selected="true" aria-controls="info-pane-controls">Controls</button>
+                <button type="button" class="info-tab" id="info-tab-layers" role="tab" aria-selected="false" aria-controls="info-pane-layers">Layers</button>
             </div>
 
-            <div class="info-section">
-                <h3>Switch Domain</h3>
-                <p><span class="key-chip">1</span> Australia - South</p>
-                <p><span class="key-chip">2</span> WA/SA</p>
-                <p><span class="key-chip">3</span> VIC/TAS</p>
-                <p><span class="key-chip">4</span> NSW</p>
+            <div id="info-pane-controls" class="info-pane" role="tabpanel" aria-labelledby="info-tab-controls">
+                <div class="info-controls-grid">
+                    <div class="info-controls-col">
+                        <div class="info-section">
+                            <h3>Information</h3>
+                            <p><span class="key-chip">I</span> Information popup</p>
+                            <p><span class="key-chip">Esc</span> Close popup / restore full table</p>
+                        </div>
+
+                        <div class="info-section">
+                            <h3>Switch Category</h3>
+                            <p><span class="key-chip">F</span> Fog & Low Cloud</p>
+                            <p><span class="key-chip">L</span> Thunderstorms</p>
+                            <p><span class="key-chip">A</span> Airmass</p>
+                            <p><span class="key-chip">T</span> Turbulence</p>
+                            <p><span class="key-chip">P</span> Policy</p>
+                        </div>
+
+                        <div class="info-section">
+                            <h3>Switch Domain</h3>
+                            <p><span class="key-chip">1</span> MAFC</p>
+                            <p><span class="key-chip">2</span> WA/SA</p>
+                            <p><span class="key-chip">3</span> VIC/TAS</p>
+                            <p><span class="key-chip">4</span> NSW</p>
+                        </div>
+                    </div>
+
+                    <div class="info-controls-col">
+                        <div class="info-section">
+                            <h3>Playback</h3>
+                            <p><span class="key-chip">Space</span> Play/Pause</p>
+                            <p><span class="key-chip">←</span> Previous frame</p>
+                            <p><span class="key-chip">→</span> Next frame</p>
+                        </div>
+
+                        <div class="info-section">
+                            <h3>Profile tools</h3>
+                            <p><span class="key-chip">S</span> Sounding</p>
+                            <p><span class="key-chip">Shift</span> <span class="key-chip">T</span> Profile table</p>
+                            <p><span class="key-chip">H</span> Hodograph</p>
+                        </div>
+                    </div>
+                </div>
             </div>
 
-            <div class="info-section">
-                <h3>Playback</h3>
-                <p><span class="key-chip">Space</span> Play/Pause</p>
-                <p><span class="key-chip">←</span> Previous frame</p>
-                <p><span class="key-chip">→</span> Next frame</p>
-            </div>
-
-            <div class="info-section">
-                <h3>Map layout</h3>
-                <p><span class="key-chip">Esc</span> Restore full table</p>
-            </div>
-
-            <div class="info-section">
-                <h3>Profile tools</h3>
-                <p><span class="key-chip">S</span> Sounding</p>
-                <p><span class="key-chip">P</span> Profile table</p>
-                <p><span class="key-chip">H</span> Hodograph</p>
+            <div id="info-pane-layers" class="info-pane hidden" role="tabpanel" aria-labelledby="info-tab-layers" hidden>
+                <div id="info-layers-body"></div>
             </div>
         </div>
     </div>
@@ -304,51 +332,61 @@
                 <div class="legend-header">
                     <div class="legend-actions">
                         <button id="legend-toggle-btn" class="legend-action-btn" type="button" aria-label="Toggle legend visibility">Hide legend</button>
+                        <button id="legend-help-btn" class="legend-help-btn" type="button" aria-label="Layer information" title="Layer information">?</button>
                     </div>
                 </div>
                 <div class="legend-content" id="legend-content"></div>
             </div>
 
-            <div class="range-time-display" id="range-time-display" aria-live="polite">
-                <div class="current-time-row">
-                    <div class="current-time-item"><strong id="current-frame-time">--</strong></div>
-                    <div class="timezone-selector">
-                        <select id="timezone-select" aria-label="Select timezone">
-                            <option value="UTC" selected>UTC (UTC+0:00)</option>
-                            <option value="AWST">AWST (UTC+8:00)</option>
-                            <option value="ACST">ACST (UTC+9:30)</option>
-                            <option value="AEST">AEST (UTC+10:00)</option>
-                            <option value="ACDT">ACDT (UTC+10:30)</option>
-                            <option value="AEDT">AEDT (UTC+11:00)</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="range-time-row">
-                    <span class="range-time-item range-time-item-start"><strong id="range-start-time">--</strong></span>
-                    <div class="slider-container">
-                        <div class="frame-slider-shell" id="frame-slider-shell">
-                            <div class="frame-slider-base" aria-hidden="true"></div>
-                            <div class="frame-selection-highlight" id="frame-selection-highlight" aria-hidden="true"></div>
-                            <input type="range" id="frame-range-start" class="frame-bound-slider" min="1" max="40" value="1" step="1" aria-label="Start frame">
-                            <input type="range" id="frame-range-end" class="frame-bound-slider" min="1" max="40" value="40" step="1" aria-label="End frame">
-                            <input type="range" id="frame-slider" class="frame-slider" min="1" max="40" value="1" step="1">
+            <div class="time-controls-row">
+                <div class="time-controls-main">
+                    <div class="range-time-display" id="range-time-display" aria-live="polite">
+                        <div class="current-time-row">
+                            <div class="current-time-item"><strong id="current-frame-time">--</strong></div>
+                            <div class="timezone-selector">
+                                <select id="timezone-select" aria-label="Select timezone">
+                                    <option value="UTC" selected>UTC (UTC+0:00)</option>
+                                    <option value="AWST">AWST (UTC+8:00)</option>
+                                    <option value="ACST">ACST (UTC+9:30)</option>
+                                    <option value="AEST">AEST (UTC+10:00)</option>
+                                    <option value="ACDT">ACDT (UTC+10:30)</option>
+                                    <option value="AEDT">AEDT (UTC+11:00)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="range-time-row">
+                            <span class="range-time-item range-time-item-start"><strong id="range-start-time">--</strong></span>
+                            <div class="slider-container">
+                                <div class="frame-slider-shell" id="frame-slider-shell">
+                                    <div class="frame-slider-base" aria-hidden="true"></div>
+                                    <div class="frame-selection-highlight" id="frame-selection-highlight" aria-hidden="true"></div>
+                                    <input type="range" id="frame-range-start" class="frame-bound-slider" min="1" max="40" value="1" step="1" aria-label="Start frame">
+                                    <input type="range" id="frame-range-end" class="frame-bound-slider" min="1" max="40" value="40" step="1" aria-label="End frame">
+                                    <input type="range" id="frame-slider" class="frame-slider" min="1" max="40" value="1" step="1">
+                                </div>
+                            </div>
+                            <span class="range-time-item range-time-item-end"><strong id="range-end-time">--</strong></span>
                         </div>
                     </div>
-                    <span class="range-time-item range-time-item-end"><strong id="range-end-time">--</strong></span>
+                    <div class="playback-controls">
+                        <button id="play-btn" class="control-btn">▶ Play</button>
+                        <div class="speed-control">
+                            <label for="speed-slider"></label>
+                            <input type="range" id="speed-slider" min="100" max="1000" value="500" step="100">
+                            <span id="speed-display">500ms</span>
+                        </div>
+                    </div>
                 </div>
-            </div>
-            
-            <div class="playback-controls">
-                <button id="play-btn" class="control-btn">▶ Play</button>
-                <div class="speed-control">
-                    <label for="speed-slider"></label>
-                    <input type="range" id="speed-slider" min="100" max="1000" value="500" step="100">
-                    <span id="speed-display">500ms</span>
+                <div id="policy-presets" class="policy-period-box" role="group" aria-labelledby="policy-period-label">
+                    <div id="policy-period-label" class="policy-period-label">Policy period</div>
+                    <button type="button" class="policy-preset-btn" data-period-index="0" aria-pressed="false">--</button>
+                    <button type="button" class="policy-preset-btn" data-period-index="1" aria-pressed="false">--</button>
                 </div>
             </div>
         </div>
 
-    <script src="sounding.js?v=hodo-srh-cols-1"></script>
-    <script src="script.js?v=row-model-1"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.js"></script>
+    <script src="sounding.js?v=profile-shift-t-1"></script>
+    <script src="script.js?v=policy-hotkey-p-1"></script>
 </body>
 </html>
