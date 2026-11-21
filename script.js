@@ -660,6 +660,54 @@ function getAxisMaxValue(pair, axis) {
     return raw === '0' || raw === '1' ? raw : '';
 }
 
+/** Short model id ('gfs' | 'icon') for the currently isolated map row, or null. */
+function getIsolatedMapModel(pair = getImagePairEl()) {
+    const maxRow = getAxisMaxValue(pair, 'row');
+    if (maxRow !== '0' && maxRow !== '1') {
+        return null;
+    }
+    const id = imageConfig[currentCategory]?.rows?.[Number(maxRow)]?.id;
+    return id === 'icon' || id === 'gfs' ? id : null;
+}
+
+function rowIndexForMapModel(modelId) {
+    const want = (String(modelId || '').toLowerCase().includes('icon')) ? 'icon' : 'gfs';
+    const rows = imageConfig[currentCategory]?.rows || [];
+    const index = rows.findIndex((row) => row.id === want);
+    return index >= 0 ? index : null;
+}
+
+/**
+ * When a model row is already isolated, switch isolation to match the profile model.
+ * No-op if both rows are visible — profile toggle must not change the map table then.
+ */
+function syncIsolatedMapModel(modelId) {
+    if (!getIsolatedMapModel()) {
+        return false;
+    }
+    const index = rowIndexForMapModel(modelId);
+    if (index == null) {
+        return false;
+    }
+    const current = getAxisMaxValue(getImagePairEl(), 'row');
+    if (current === String(index)) {
+        return false;
+    }
+    setAxisMaximize('row', String(index), { notify: true, syncSounding: false });
+    return true;
+}
+
+function syncSoundingModelFromIsolatedRow() {
+    const model = getIsolatedMapModel();
+    if (!model) {
+        return;
+    }
+    window.SoundingViewer?.setSelectedModel?.(model, {
+        reload: Boolean(window.SoundingViewer?.isOpen?.()),
+        syncMapIfIsolated: false,
+    });
+}
+
 function isAxisMaximizeActive(pair = getImagePairEl()) {
     return Boolean(getAxisMaxValue(pair, 'col') || getAxisMaxValue(pair, 'row'));
 }
@@ -723,7 +771,7 @@ function syncAxisMaximizeButtons() {
     }
 }
 
-function setAxisMaximize(axis, value, { notify = true } = {}) {
+function setAxisMaximize(axis, value, { notify = true, syncSounding = true } = {}) {
     const pair = getImagePairEl();
     if (!pair || (axis !== 'col' && axis !== 'row')) {
         return;
@@ -745,6 +793,10 @@ function setAxisMaximize(axis, value, { notify = true } = {}) {
     }
 
     syncAxisMaximizeButtons();
+    // Isolating a model row drives the profile toggle; clearing isolation leaves profile alone.
+    if (syncSounding && axis === 'row' && next) {
+        syncSoundingModelFromIsolatedRow();
+    }
     if (notify) {
         notifyMapLayoutChanged();
     }
@@ -4023,5 +4075,6 @@ window.AnimationController = {
     getCurrentDomain: () => currentDomain,
     getValidTime: () => getValidDateForFramePair(getCurrentFramePairs()[currentFrame - 1]),
     clearAxisMaximize,
+    syncIsolatedMapModel,
     isAnimationPlaying: () => isPlaying
 };

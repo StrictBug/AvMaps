@@ -1954,35 +1954,25 @@ POLICY_ICING_MAX_HEIGHT_FT = 10000.0
 
 
 def calculate_policy_icing_rh(data):
-    """Icing RH below 10000 ft AMSL for one timestep.
+    """Icing RH for one timestep where freezing level is below 10000 ft.
 
-    Uses the 0C to -15C icing layer, but only on isobaric levels below 10000 ft
-    and only where the freezing level itself is below 10000 ft. The viewer then
-    takes the maximum of this field over the selected accumulation period.
+    Same field as Airmass icing severity (mean RH in the 0C to -15C layer),
+    masked to columns with FZL < 10000 ft. The viewer takes the maximum over
+    the selected accumulation period.
     """
-    temp_isobaric_c = get_time_index(data['Temperature_isobaric']).values - 273.15
-    rh_isobaric = get_time_index(data['Relative_humidity_isobaric']).values
-    hgt_isobaric_ft = np.asarray(get_time_index(data['Geopotential_height_isobaric']).values, dtype=float) * 3.28084
-
-    in_icing_below = (
-        (temp_isobaric_c <= 0.0)
-        & (temp_isobaric_c >= -15.0)
-        & (hgt_isobaric_ft < POLICY_ICING_MAX_HEIGHT_FT)
-        & np.isfinite(rh_isobaric)
-        & np.isfinite(hgt_isobaric_ft)
+    icing_rh = calculate_icing_relative_humidity(data)
+    freezing_level_ft = np.asarray(calculate_freezing_level_height_ft(data), dtype=float)
+    # Match Airmass FZL sanitization: negative / non-finite FZL is not a valid gate.
+    freezing_level_ft = np.where(
+        np.isfinite(freezing_level_ft) & (freezing_level_ft >= 0.0),
+        freezing_level_ft,
+        np.nan,
     )
-    rh_sum = np.sum(np.where(in_icing_below, rh_isobaric, 0.0), axis=0)
-    rh_count = np.sum(in_icing_below, axis=0)
-    mean_rh = np.full(rh_sum.shape, np.nan, dtype=float)
-    valid = rh_count > 0
-    mean_rh[valid] = rh_sum[valid] / rh_count[valid]
-
-    freezing_level_ft = calculate_freezing_level_height_ft(data)
     return np.where(
-        np.isfinite(mean_rh)
+        np.isfinite(icing_rh)
         & np.isfinite(freezing_level_ft)
         & (freezing_level_ft < POLICY_ICING_MAX_HEIGHT_FT),
-        mean_rh,
+        icing_rh,
         np.nan,
     )
 
