@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Aviation map viewer</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="styles.css?v=policy-overlay-fit-1">
+    <link rel="stylesheet" href="styles.css?v=model-toggle-1">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.css">
 </head>
 <body class="loading">
@@ -128,13 +128,20 @@
                                     <option value="__map__">Map point</option>
                                 </select>
                             </label>
-                            <label class="sounding-model-picker" for="sounding-model-select">
-                                <span class="sounding-model-picker-label">Model</span>
-                                <select id="sounding-model-select" class="sounding-model-select" aria-label="Profile model">
-                                    <option value="gfs_seamless">GFS</option>
-                                    <option value="icon_seamless">ICON</option>
-                                </select>
-                            </label>
+                            <div class="sounding-model-toggle" role="group" aria-label="Profile model">
+                                <button
+                                    type="button"
+                                    class="sounding-model-toggle-btn active"
+                                    data-sounding-model="gfs_seamless"
+                                    aria-pressed="true"
+                                >GFS</button>
+                                <button
+                                    type="button"
+                                    class="sounding-model-toggle-btn"
+                                    data-sounding-model="icon_seamless"
+                                    aria-pressed="false"
+                                >ICON</button>
+                            </div>
                             <button id="sounding-close-btn" class="sounding-close-btn" type="button" aria-label="Close profile panel">×</button>
                         </div>
                     </div>
@@ -404,7 +411,7 @@
         </div>
 
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.js"></script>
-    <script src="sounding.js?v=profile-shift-t-1"></script>
-    <script src="script.js?v=policy-layers-off-1"></script>
+    <script src="sounding.js?v=model-toggle-1"></script>
+    <script src="script.js?v=model-toggle-1"></script>
 </body>
 </html>

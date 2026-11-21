@@ -61,7 +61,8 @@
     let loadingEl;
     let hoverEl;
     let closeBtn;
-    let modelSelectEl;
+    let modelToggleEl;
+    let modelToggleButtons = [];
     let locationSelectEl;
     let viewStackEl;
     let tableWrapEl;
@@ -145,7 +146,10 @@
         loadingEl = document.getElementById('sounding-loading');
         hoverEl = document.getElementById('sounding-hover');
         closeBtn = document.getElementById('sounding-close-btn');
-        modelSelectEl = document.getElementById('sounding-model-select');
+        modelToggleEl = document.querySelector('.sounding-model-toggle');
+        modelToggleButtons = modelToggleEl
+            ? Array.from(modelToggleEl.querySelectorAll('[data-sounding-model]'))
+            : [];
         locationSelectEl = document.getElementById('sounding-location-select');
         viewStackEl = document.getElementById('sounding-view-stack');
         tableWrapEl = document.getElementById('sounding-table-wrap');
@@ -191,13 +195,20 @@
         if (closeBtn) {
             closeBtn.addEventListener('click', close);
         }
-        if (modelSelectEl) {
-            modelSelectEl.value = selectedModelId;
-            modelSelectEl.addEventListener('change', () => {
-                setSelectedModel(modelSelectEl.value, { reload: panelOpen });
-                releaseProfileSelectFocus(modelSelectEl);
+        syncModelToggle();
+        modelToggleButtons.forEach((button) => {
+            if (button.dataset.bound) {
+                return;
+            }
+            button.dataset.bound = '1';
+            button.addEventListener('click', () => {
+                setSelectedModel(button.getAttribute('data-sounding-model'), {
+                    reload: panelOpen,
+                    // Only retarget the map when a model row is already isolated.
+                    syncMapIfIsolated: true,
+                });
             });
-        }
+        });
         if (locationSelectEl) {
             locationSelectEl.addEventListener('change', () => {
                 handleLocationSelect(locationSelectEl.value);
@@ -503,13 +514,28 @@
         return SOUNDING_MODELS[id] || SOUNDING_MODELS[DEFAULT_SOUNDING_MODEL];
     }
 
-    function setSelectedModel(modelId, { reload = false } = {}) {
+    function syncModelToggle() {
+        modelToggleButtons.forEach((button) => {
+            const active = normalizeModelId(button.getAttribute('data-sounding-model')) === selectedModelId;
+            button.classList.toggle('active', active);
+            button.setAttribute('aria-pressed', active ? 'true' : 'false');
+        });
+    }
+
+    function shortMapModelId(modelId = selectedModelId) {
+        return normalizeModelId(modelId) === SOUNDING_MODELS.icon_seamless.id ? 'icon' : 'gfs';
+    }
+
+    function setSelectedModel(modelId, { reload = false, syncMapIfIsolated = false } = {}) {
         const nextModelId = normalizeModelId(modelId);
         const changed = nextModelId !== selectedModelId;
         selectedModelId = nextModelId;
-        if (modelSelectEl && modelSelectEl.value !== selectedModelId) {
-            modelSelectEl.value = selectedModelId;
+        syncModelToggle();
+
+        if (syncMapIfIsolated) {
+            window.AnimationController?.syncIsolatedMapModel?.(shortMapModelId(selectedModelId));
         }
+
         if (!changed && !reload) {
             return;
         }
